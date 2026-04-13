@@ -1,6 +1,8 @@
 #include <cuda_runtime.h>
 #include <cfloat>
 #include <cmath>
+#include <cstdio>
+
 
 // Helper device function to implement atomicMin for floats.
 // This allows robust block-wide minimum tracking regardless of architecture.
@@ -148,6 +150,8 @@ void launchCombineTrellisStages(
     }
 }
 
+template void launchCombineTrellisStages< 8>(const float*, const float*, float*, int*, int, cudaStream_t);
+template void launchCombineTrellisStages<16>(const float*, const float*, float*, int*, int, cudaStream_t);
 template void launchCombineTrellisStages<32>(const float*, const float*, float*, int*, int, cudaStream_t);
 template void launchCombineTrellisStages<64>(const float*, const float*, float*, int*, int, cudaStream_t);
 
@@ -161,7 +165,15 @@ extern "C" {
         int M,
         int N
     ) {
-        if (M == 32) {
+        if (M == 8) {
+            launchCombineTrellisStages< 8>(
+                (const float*)d_left, (const float*)d_right,
+                (float*)d_out, (int*)d_argmin, N, 0);
+        } else if (M == 16) {
+            launchCombineTrellisStages<16>(
+                (const float*)d_left, (const float*)d_right,
+                (float*)d_out, (int*)d_argmin, N, 0);
+        } else if (M == 32) {
             launchCombineTrellisStages<32>(
                 (const float*)d_left, (const float*)d_right,
                 (float*)d_out, (int*)d_argmin, N, 0);
@@ -169,6 +181,8 @@ extern "C" {
             launchCombineTrellisStages<64>(
                 (const float*)d_left, (const float*)d_right,
                 (float*)d_out, (int*)d_argmin, N, 0);
+        } else {
+            fprintf(stderr, "launch_combine_kernel: unsupported M=%d (must be 8, 16, 32, or 64)\n", M);
         }
     }
 }
