@@ -1,6 +1,24 @@
-# TBCC Decoder Test Suite
+# TBCC Decoder Test
 
-A lightweight test harness for the parallel trellis-stage combiner described in the ISIT paper. Combines pairs of trellis stages via a min-plus matrix product, with a compiled CUDA kernel for GPU acceleration and a Numba CPU implementation for verification.
+## What this code does and how it works 
+
+Decoding a Tail-Biting Convolutional Code (TBCC) involves running a Viterbi-like search through a trellis — a graph where each node is a decoder state and each edge carries a branch metric (a cost). To combine two adjacent trellis stages into one, you need to find, for every (source state `s`, destination state `d`) pair, the best intermediate state `r` that minimizes the total path cost:
+
+```
+output[s, d] = min over r of ( left[s, r] + right[r, d] )
+```
+
+The kernel `combiner.cu` uses a min-plus matrix product which has the same structure as regular matrix multiply but with (min, +) instead of (multiply, add).
+
+Inputs: `left` and `right` are M×M matrices of branch metrics for the two stages being merged. Currently these are filled with random float32 values as placeholder.
+ 
+Outputs: The combined M×M metric matrix (the min-plus result), and an M×M argmin matrix recording which intermediate state `r` achieved each minimum. The argmin is needed for traceback reconstructing the most likely transmitted sequence.
+
+The GPU version parallelizes this. Each CUDA block handles one stage pair. Within a block, up to M² threads each take one `(s, d)` entry and race through the M intermediate states in parallel. Bringing wall-clock time down to roughly O(M) per combine step.
+
+After combining, each output matrix is normalized by subtracting its minimum value to prevent metrics from growing unboundedly across many merges.
+
+`run_combiner.py` runs both CPU and GPU versions on the same input, times them, and checks the outputs match.
 
 ---
 
@@ -10,104 +28,83 @@ A lightweight test harness for the parallel trellis-stage combiner described in 
 pip install numpy numba pyyaml
 ```
 
-If you want the GPU path, you also need the CUDA toolkit with `nvcc` on your PATH.
-
 ---
 
-## Build the CUDA kernel
+## Build
 
 ```bash
 bash compile.sh
 ```
 
-This compiles `combiner.cu` into `lib/libtrellis.so`. The default target is `sm_89` (RTX 40-series). Change the `-gencode` flag in `compile.sh` if you have a different GPU:
+Compiles `combiner.cu` → `lib/libtrellis.so`. Default target is `sm_89` (RTX 40-series). Change the `-gencode` flag in `compile.sh` for your GPU:
 
-- RTX 20-series / T4 → `sm_75`
+- T4 / RTX 20-series → `sm_75`
 - A100 → `sm_80`
 - RTX 30-series → `sm_86`
 - RTX 40-series → `sm_89`
 
-**Windows:** Run the script inside **Git Bash** or **WSL**. Or run `nvcc` directly in PowerShell:
-```powershell
-mkdir -Force lib
-nvcc -shared -Xcompiler -fPIC -O3 -gencode arch=compute_89,code=sm_89 combiner.cu -o lib/libtrellis.so
-```
-
 ---
 
-## Run
+## Run code
 
 ```bash
-# GPU + CPU, compare results (default)
+# GPU + CPU, compare results
 python run_combiner.py --yaml config/k11n22v3.yaml
 
-# CPU only (skip CUDA even if GPU is present)
+# CPU only
 python run_combiner.py --yaml config/k11n22v3.yaml --cpu
 ```
 
-If the compiled `.so` is missing or no GPU is available, the script automatically falls back to CPU and prints a warning.
-
-Typical output:
-```
-Loaded config: config/k11n22v3.yaml
-Stages: 11, States: 8
-CPU (Numba) finished in 0.012s
-CUDA (Compiled .so) finished in 0.004s
-Speedup: 3.00x
-Comparison Success: CPU and CUDA results match.
-```
-
 ---
 
-## Project Structure
 
-```
-├── combiner.cu              # CUDA kernel + extern "C" launcher
-├── compile.sh               # builds lib/libtrellis.so
-├── run_combiner.py          # main driver: CPU + CUDA paths, timing, comparison
-├── cpu_combiner.py          # Numba @njit CPU reference implementation
-├── combiner_test.py         # standalone Numba CUDA prototype + NumPy reference
-├── utils/
-│   ├── yaml_loader.py       # loads config YAML and builds input tensors
-│   └── cuda_driver.py       # ctypes bridge into the compiled .so
-├── config/
-│   └── k11n22v3.yaml        # example TBCC configuration
-└── lib/
-    └── libtrellis.so        # compiled output (generated — not tracked by git)
-```
+## Running on Google Colab (for the free T4 GPU)
 
----
 
-## How it works
+**Step 1 Change runtime to GPU**
 
-The kernel computes a min-plus matrix product over `N` independent stage pairs:
+`Runtime → Change runtime type → T4 GPU`
 
-```
-output[i, s, d] = min over r of ( left[i, s, r] + right[i, r, d] )
-```
-
-One CUDA block handles one stage pair. Each block loads its M×M matrices into shared memory, finds the best intermediate state `r` for every `(s, d)` pair, then normalizes by subtracting the block minimum to prevent metric overflow over many iterations.
-
----
-
-## Standalone benchmark
-
-```bash
-python combiner_test.py
-```
-
-Runs the Numba CUDA kernel prototype and a pure NumPy reference side by side and checks they match.
-
----
-
-## No GPU? Use Google Colab
-
-Set runtime to T4 GPU (`Runtime > Change runtime type > T4 GPU`), then:
+**Step 2 Verify GPU is available**
 
 ```python
-!git clone https://github.com/UCLA-Communications-Systems-Lab/tbcc-decoder-test
-%cd tbcc-decoder-test
+!nvidia-smi
+!nvcc --version
+```
+
+Both should print output. If `nvidia-smi` says command not found, you forgot Step 1.
+
+**Step 3 — Mount Drive and unzip**
+
+```python
+from google.colab import drive
+drive.mount('/content/drive')
+
+!unzip "/content/drive/MyDrive/<path-to-your-zip>/tbcc-decoder-test.zip" -d /content/
+%cd /content/tbcc-decoder-test
+```
+
+**Step 4 — Install dependencies**
+
+```python
 !pip install numba numpy pyyaml
-!bash compile.sh
+```
+
+**Step 5 — Compile the kernel**
+
+Colab's free tier uses a T4 (`sm_75`), so compile for that explicitly:
+
+```python
+!mkdir -p lib
+!nvcc -shared -Xcompiler -fPIC -O3 -gencode arch=compute_75,code=sm_75 combiner.cu -o lib/libtrellis.so
+
+# Verify it was created
+import os
+print(os.path.exists("lib/libtrellis.so"))  # should print True
+```
+
+**Step 6 — Run**
+
+```python
 !python run_combiner.py --yaml config/k11n22v3.yaml
 ```
