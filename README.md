@@ -17,8 +17,8 @@ The GPU version assigns one CUDA block per stage pair, with up to M² threads ea
 - `run_combiner.py` : the entry point. Loads the config, generates the input tensors, runs both implementations, prints timing, and compares outputs.
 - `combiner.cu` : the CUDA kernel. Compiled once with `compile.sh` into `lib/libtrellis.so`.
 - `utils/cuda_driver.py` : loads `libtrellis.so` via ctypes, allocates GPU memory with Numba, passes raw device pointers to the C launcher, and copies results back.
-- `cpu_combiner.py` : the ground truth. A Numba JIT-compiled CPU implementation of the same min-plus product, used to verify the GPU output is correct.
-- `utils/yaml_loader.py` : reads the TBCC config and builds the random input tensors.
+- `cpu_combiner.py` : the ground truth. A Numba CPU implementation of the same min-plus product, used to verify the GPU output is correct.
+- `utils/yaml_loader.py` : reads the TBCC config and builds the psuedo-random input tensors.
 - `config/k11n22v3.yaml` : example code parameters (K=11, N=22, constraint length V=3).
 
 ---

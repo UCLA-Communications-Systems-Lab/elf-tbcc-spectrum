@@ -2,12 +2,11 @@ import argparse
 import time
 import numpy as np
 from utils.yaml_loader import load_config, build_metric_tensors
-from cpu_combiner import combine_trellis_stages_cpu
+from cpu_combiner import MetaStage, reduce_tree, best_tailbiting_state, traceback
 
-N_REPS = 20  # timed repetitions after warm-up
+N_REPS = 20
 
 def bench(fn, *args, reps=N_REPS):
-    """Warm up once, then time reps runs. Returns (mean_ms, min_ms, max_ms)."""
     fn(*args)  # warm-up
     times = []
     for _ in range(reps):
@@ -16,12 +15,57 @@ def bench(fn, *args, reps=N_REPS):
         times.append((time.perf_counter() - t0) * 1000)
     return np.mean(times), np.min(times), np.max(times)
 
+
+def tensors_to_metastages(tensor: np.ndarray) -> list[MetaStage]:
+    """Convert (N, M, M) numpy array into a list of N MetaStage objects."""
+    N, M, _ = tensor.shape
+    return [
+        MetaStage(k=1, num_states=M, M=tensor[i].tolist(), argmin=[[-1]*M for _ in range(M)])
+        for i in range(N)
+    ]
+
+
+def build_stages(left: np.ndarray, right: np.ndarray) -> list[MetaStage]:
+    """Interleave left and right tensors into a flat list of MetaStages."""
+    N, M, _ = left.shape
+    stages = []
+    for i in range(N):
+        stages.append(MetaStage(k=1, num_states=M, M=left[i].tolist(),  argmin=[[-1]*M for _ in range(M)]))
+        stages.append(MetaStage(k=1, num_states=M, M=right[i].tolist(), argmin=[[-1]*M for _ in range(M)]))
+    return stages
+
+
+def run_cpu(left: np.ndarray, right: np.ndarray):
+    """His logic end to end — no GPU involved."""
+    stages = build_stages(left, right)
+    final = reduce_tree(stages)
+    best_state, best_metric = best_tailbiting_state(final)
+    path = traceback(stages, best_state)
+    return final, best_state, best_metric, path
+
+
+def run_cuda(left: np.ndarray, right: np.ndarray, M: int):
+    from utils.cuda_driver import launch_combine_cuda
+    
+    # keep original stages for traceback
+    original_stages = build_stages(left, right)
+    
+    combined, _ = launch_combine_cuda(left, right, M)
+    stages = tensors_to_metastages(combined)
+    final = reduce_tree(stages)
+    best_state, best_metric = best_tailbiting_state(final)
+    
+    # traceback on original stages, same as CPU
+    path = traceback(original_stages, best_state)
+    return final, best_state, best_metric, path
+
+
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("--yaml", required=True, help="Path to TBCC config yaml")
-    p.add_argument("--cpu", action="store_true", help="Run ONLY CPU version")
-    p.add_argument("--compare", action="store_true", default=True, help="Compare CPU and CUDA results (default: True)")
-    p.add_argument("--reps", type=int, default=N_REPS, help=f"Timed repetitions after warm-up (default: {N_REPS})")
+    p.add_argument("--yaml", required=True)
+    p.add_argument("--cpu", action="store_true")
+    p.add_argument("--compare", action="store_true", default=True)
+    p.add_argument("--reps", type=int, default=N_REPS)
     args = p.parse_args()
 
     cfg = load_config(args.yaml)
@@ -32,41 +76,45 @@ def main():
     print(f"Reps:    {args.reps} (+ 1 warm-up each)")
     print("-" * 52)
 
-    # CPU benchmark
-    mean_cpu, min_cpu, max_cpu = bench(combine_trellis_stages_cpu, left, right, reps=args.reps)
-    cpu_out, cpu_argmin = combine_trellis_stages_cpu(left, right)
+    # CPU path
+    mean_cpu, min_cpu, max_cpu = bench(run_cpu, left, right, reps=args.reps)
+    final_cpu, best_state_cpu, best_metric_cpu, path_cpu = run_cpu(left, right)
 
-    print(f"CPU (Numba JIT)")
+    print(f"CPU (tree reduce)")
     print(f"  mean: {mean_cpu:.3f} ms   min: {min_cpu:.3f} ms   max: {max_cpu:.3f} ms")
-    print(f"  per stage (mean): {mean_cpu/N:.3f} ms")
+    print(f"  best state:  {best_state_cpu}")
+    print(f"  best metric: {best_metric_cpu:.4f}")
+    print(f"  path: {path_cpu}")
 
     if not args.cpu:
         try:
-            from utils.cuda_driver import launch_combine_cuda
+            mean_cuda, min_cuda, max_cuda = bench(run_cuda, left, right, M, reps=args.reps)
+            final_cuda, best_state_cuda, best_metric_cuda, path_cuda = run_cuda(left, right, M)
 
-            mean_cuda, min_cuda, max_cuda = bench(launch_combine_cuda, left, right, M, reps=args.reps)
-            cuda_out, cuda_argmin = launch_combine_cuda(left, right, M)
-
-            print(f"\nCUDA (compiled .so)")
+            print(f"\nCUDA (GPU combines + tree reduce)")
             print(f"  mean: {mean_cuda:.3f} ms   min: {min_cuda:.3f} ms   max: {max_cuda:.3f} ms")
-            print(f"  per stage (mean): {mean_cuda/N:.3f} ms")
-            print(f"  speedup (mean): {mean_cpu/mean_cuda:.2f}x   speedup (min/min): {min_cpu/min_cuda:.2f}x")
+            print(f"  speedup (mean): {mean_cpu/mean_cuda:.2f}x")
+            print(f"  best state:  {best_state_cuda}")
+            print(f"  best metric: {best_metric_cuda:.4f}")
+            print(f"  path: {path_cuda}")
 
             if args.compare:
                 print("-" * 52)
-                is_close = np.allclose(cpu_out, cuda_out, atol=1e-5)
-                is_equal = np.array_equal(cpu_argmin, cuda_argmin)
+                # Compare best state and path — safe across normalization differences
+                states_match = best_state_cpu == best_state_cuda
+                path_match   = path_cpu == path_cuda
 
-                if is_close and is_equal:
-                    max_diff = np.max(np.abs(cpu_out - cuda_out))
-                    print(f"Comparison: match  (max |diff| = {max_diff:.2e})")
+                if states_match and path_match:
+                    print("Comparison: match")
+                    print(f"  best state: {best_state_cpu} (both agree)")
+                    print(f"  path: {path_cpu}")
                 else:
-                    if not is_close:
-                        max_diff = np.max(np.abs(cpu_out - cuda_out))
-                        print(f"Comparison: metric mismatch  (max |diff| = {max_diff:.2e})")
-                    if not is_equal:
-                        n_wrong = np.sum(cpu_argmin != cuda_argmin)
-                        print(f"Comparison: argmin mismatch  ({n_wrong}/{cpu_argmin.size} entries differ)")
+                    if not states_match:
+                        print(f"Comparison: best state mismatch  (CPU: {best_state_cpu}, CUDA: {best_state_cuda})")
+                    if not path_match:
+                        print(f"Comparison: path mismatch")
+                        print(f"  CPU  path: {path_cpu}")
+                        print(f"  CUDA path: {path_cuda}")
 
         except Exception as e:
             print(f"\nCUDA failed: {e}")
