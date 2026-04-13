@@ -1,6 +1,8 @@
 #include <cuda_runtime.h>
 #include <cfloat>
 #include <cmath>
+#include <cstdio>
+
 
 // Helper device function to implement atomicMin for floats.
 // This allows robust block-wide minimum tracking regardless of architecture.
@@ -123,17 +125,7 @@ __global__ void combineTrellisStagesKernel(
     }
 }
 
-/**
- * Host wrapper function to organize parameters, grid dimensions, and make the launch call.
- * 
- * @tparam M Number of states in the trellis
- * @param d_input_stage_left Metrics for stage 2i device ptr
- * @param d_input_stage_right Metrics for stage 2i+1 device ptr
- * @param d_output_stage Normalized combined output metrics device ptr
- * @param d_output_argmin Minimized path selection values device ptr
- * @param N Total number of stage pairs
- * @param stream Optional CUDA stream
- */
+// Host launcher – sets block/grid dims and dispatches the kernel.
 template <int M>
 void launchCombineTrellisStages(
     const float* d_input_stage_left,
@@ -143,14 +135,10 @@ void launchCombineTrellisStages(
     int N,
     cudaStream_t stream = 0)
 {
-    // Hard limit per-block thread layout based on conventional 1024 cap limit
     int block_x = (M < 32) ? M : 32;
     int block_y = (M < 32) ? M : 32;
-
     dim3 block(block_x, block_y);
-    dim3 grid(N); // Grid natively handles the N independent stage pairs on x-idx
-
-    // Ensure we actually have data to process before dispatch 
+    dim3 grid(N);
     if (N > 0) {
         combineTrellisStagesKernel<M><<<grid, block, 0, stream>>>(
             d_input_stage_left,
@@ -162,9 +150,39 @@ void launchCombineTrellisStages(
     }
 }
 
-// Example explicit template instantiations, should you require them.
-// Uncomment/extend these if you plan to link against this file from another compilation unit.
-/*
+template void launchCombineTrellisStages< 8>(const float*, const float*, float*, int*, int, cudaStream_t);
+template void launchCombineTrellisStages<16>(const float*, const float*, float*, int*, int, cudaStream_t);
 template void launchCombineTrellisStages<32>(const float*, const float*, float*, int*, int, cudaStream_t);
 template void launchCombineTrellisStages<64>(const float*, const float*, float*, int*, int, cudaStream_t);
-*/
+
+// Exported C symbol – called by cuda_driver.py via ctypes
+extern "C" {
+    void launch_combine_kernel(
+        void* d_left,
+        void* d_right,
+        void* d_out,
+        void* d_argmin,
+        int M,
+        int N
+    ) {
+        if (M == 8) {
+            launchCombineTrellisStages< 8>(
+                (const float*)d_left, (const float*)d_right,
+                (float*)d_out, (int*)d_argmin, N, 0);
+        } else if (M == 16) {
+            launchCombineTrellisStages<16>(
+                (const float*)d_left, (const float*)d_right,
+                (float*)d_out, (int*)d_argmin, N, 0);
+        } else if (M == 32) {
+            launchCombineTrellisStages<32>(
+                (const float*)d_left, (const float*)d_right,
+                (float*)d_out, (int*)d_argmin, N, 0);
+        } else if (M == 64) {
+            launchCombineTrellisStages<64>(
+                (const float*)d_left, (const float*)d_right,
+                (float*)d_out, (int*)d_argmin, N, 0);
+        } else {
+            fprintf(stderr, "launch_combine_kernel: unsupported M=%d (must be 8, 16, 32, or 64)\n", M);
+        }
+    }
+}

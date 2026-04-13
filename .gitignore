@@ -1,0 +1,41 @@
+# .gitignore for tbcc-decoder-test
+# -------------------------------------------------
+# Python / virtual‑env artefacts
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Jupyter / notebook artefacts (if any)
+.ipynb_checkpoints/
+
+# OS / editor artefacts
+.DS_Store
+Thumbs.db
+
+# Build / compiled artefacts
+*.o
+*.obj
+*.so
+*.dll
+*.exe
+
+# CUDA artefacts (compiled PTX / cubin)
+*.ptx
+*.cubin
+
+# Log / temporary files
+*.log
+*.tmp
+
+# Miscellaneous
+*.swp
+*.swo
+
+# Ensure the PDF and source files are tracked
+!Parallel\ Decoding\ of\ Trellis\ Stages\ for\ Low\ Latency\ Decoding\ of\ Tail-Biting\ Convolutional\ Codes.pdf
+!combiner.cu
+!combiner_test.py
+!requirements.txt
+lib/
