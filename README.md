@@ -1,24 +1,25 @@
 # TBCC Decoder Test
 
-## What this code does and how it works 
+## What This Code Does
 
-Decoding a Tail-Biting Convolutional Code (TBCC) involves running a Viterbi-like search through a trellis — a graph where each node is a decoder state and each edge carries a branch metric (a cost). To combine two adjacent trellis stages into one, you need to find, for every (source state `s`, destination state `d`) pair, the best intermediate state `r` that minimizes the total path cost:
-
+`combiner.cu` implements a min-plus matrix product — for every (s, d) pair, find the intermediate state r that minimizes the total path cost across two trellis stages:
 ```
 output[s, d] = min over r of ( left[s, r] + right[r, d] )
 ```
 
-The kernel `combiner.cu` uses a min-plus matrix product which has the same structure as regular matrix multiply but with (min, +) instead of (multiply, add).
+Inputs: left and right are M×M matrices of branch metrics for the two stages being merged. Currently filled with random float32 values as placeholders.
 
-Inputs: `left` and `right` are M×M matrices of branch metrics for the two stages being merged. Currently these are filled with random float32 values as placeholder.
- 
-Outputs: The combined M×M metric matrix (the min-plus result), and an M×M argmin matrix recording which intermediate state `r` achieved each minimum. The argmin is needed for traceback reconstructing the most likely transmitted sequence.
+Outputs: The combined M×M metric matrix, and an M×M argmin matrix recording which r achieved each minimum. The argmin is used for the traceback.
 
-The GPU version parallelizes this. Each CUDA block handles one stage pair. Within a block, up to M² threads each take one `(s, d)` entry and race through the M intermediate states in parallel. Bringing wall-clock time down to roughly O(M) per combine step.
+The GPU version assigns one CUDA block per stage pair, with up to M² threads each handling one (s, d) entry in parallel. Each output matrix is normalized by subtracting its block minimum to prevent metric overflow across many merges.
 
-After combining, each output matrix is normalized by subtracting its minimum value to prevent metrics from growing unboundedly across many merges.
-
-`run_combiner.py` runs both CPU and GPU versions on the same input, times them, and checks the outputs match.
+## Files Included in Project
+- `run_combiner.py` : the entry point. Loads the config, generates the input tensors, runs both implementations, prints timing, and compares outputs.
+- `combiner.cu` : the CUDA kernel. Compiled once with `compile.sh` into `lib/libtrellis.so`.
+- `utils/cuda_driver.py` : loads `libtrellis.so` via ctypes, allocates GPU memory with Numba, passes raw device pointers to the C launcher, and copies results back.
+- `cpu_combiner.py` : the ground truth. A Numba JIT-compiled CPU implementation of the same min-plus product, used to verify the GPU output is correct.
+- `utils/yaml_loader.py` : reads the TBCC config and builds the random input tensors.
+- `config/k11n22v3.yaml` : example code parameters (K=11, N=22, constraint length V=3).
 
 ---
 
