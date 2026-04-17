@@ -15,11 +15,13 @@ __pycache__/
 Thumbs.db
 
 # Build / compiled artefacts
+build/
 *.o
 *.obj
 *.so
 *.dll
 *.exe
+*.idx
 
 # CUDA artefacts (compiled PTX / cubin)
 *.ptx
@@ -32,6 +34,7 @@ Thumbs.db
 # Miscellaneous
 *.swp
 *.swo
+.vscode/
 
 # Ensure the PDF and source files are tracked
 !Parallel\ Decoding\ of\ Trellis\ Stages\ for\ Low\ Latency\ Decoding\ of\ Tail-Biting\ Convolutional\ Codes.pdf
