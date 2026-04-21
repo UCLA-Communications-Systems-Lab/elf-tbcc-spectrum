@@ -12,6 +12,20 @@ typedef cgbn_context_t<TPI> context_t;
 typedef cgbn_env_t<context_t, BITS> env_t;
 typedef cgbn_mem_t<BITS> bn_mem_t; // storage type (for both global & shared memory)
 
+template <typename T>
+__global__ void accumulate_to_spectrum(
+    const T* buffer, int buffer_dim0, int buffer_dim1, 
+    int state_idx, 
+    T* spectrum
+) {
+    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    int max_X = buffer_dim1;
+
+    if (x < max_X) {
+        atomicAdd(&spectrum[x], buffer[state_idx * max_X + x]);
+    }
+}
+
 // standard cuda implementation of foldshift kernel (from distance_spectrum.cu)
 // added a couple optimizations 
 // (removed dead branch condition checking, minimized global memory touches, etc.)
@@ -20,10 +34,9 @@ __global__ void numba_sharedMem_trellisStep_foldshift(
     const T* __restrict__ A_in, int A_dim0, int A_dim1,
     const uint8_t* __restrict__ W_in, int W_dim0, int W_dim1,
     const uint32_t* __restrict__ D_in, int D_dim0, int D_dim1,
-    T* __restrict__ out, int out_dim0, int out_dim1
+    T* __restrict__ out, int out_dim0, int out_dim1, int curr_max_weight
 ) {
     uint32_t num_states = A_dim0;
-    uint32_t curr_max_weight = A_dim1;
 
     uint32_t x = blockIdx.x * blockDim.x + threadIdx.x;
     uint32_t y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -148,14 +161,13 @@ __global__ void cgbn_sharedMem_trellisStep_foldshift(
     const bn_mem_t* __restrict__ A_in, int A_dim0, int A_dim1,
     const uint8_t* __restrict__ W_in, int W_dim0, int W_dim1,
     const uint32_t* __restrict__ D_in, int D_dim0, int D_dim1,
-    bn_mem_t* __restrict__ out, int out_dim0, int out_dim1
+    bn_mem_t* __restrict__ out, int out_dim0, int out_dim1, int curr_max_weight
 ) {
     context_t bn_context;
     env_t bn_env(bn_context);
     typedef typename env_t::cgbn_t bn_t;
 
     uint32_t num_states = A_dim0;
-    uint32_t curr_max_weight = A_dim1;
 
     uint32_t x = blockIdx.x * blockDim.x + threadIdx.x;
     uint32_t y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -308,4 +320,43 @@ __global__ void cgbn_sharedMem_trellisStep_foldshift(
             cgbn_store(bn_env, &out[(2 * y + z) * out_dim1 + carry_x], carry);
         }
     }
+}
+
+// launch wrapper so we can have python driver 
+extern "C" void launchFoldshiftPipeline (
+    uint64_t* d_buffer_a, uint64_t* d_buffer_b,
+    int num_states, int initial_max_weight,
+    const uint8_t* d_W, int W_dim0, int W_dim1,
+    const uint32_t* d_D, int D_dim0, int D_dim1,
+    int num_trellis_stages, int max_shift_per_stage, int max_X,
+    int basis_state, uint64_t* d_spectrum
+) {
+    uint64_t* d_in = d_buffer_a;
+    uint64_t* d_out = d_buffer_b;
+    int curr_max_weight = initial_max_weight;
+ 
+    for (int stage = 0; stage < num_trellis_stages; ++stage) {
+        cudaMemset(d_out, 0, sizeof(uint64_t) * num_states * max_X);
+ 
+        dim3 block(32, 32, 1);
+        dim3 grid(1, (num_states / 2 + 31) / 32, W_dim1);
+ 
+        numba_sharedMem_trellisStep_foldshift<uint64_t><<<grid, block>>>(
+            d_in,  num_states, max_X,
+            d_W,   W_dim0, W_dim1,
+            d_D,   D_dim0, D_dim1,
+            d_out, num_states, max_X,
+            curr_max_weight
+        );
+        curr_max_weight += max_shift_per_stage;
+ 
+        uint64_t* tmp = d_in; d_in = d_out; d_out = tmp;
+    }
+ 
+    int threads = 256;
+    int blocks_1d = (max_X + threads - 1) / threads;
+    accumulate_to_spectrum<uint64_t><<<blocks_1d, threads>>>(
+        d_in, num_states, max_X, basis_state, d_spectrum
+    );
+    cudaDeviceSynchronize();
 }
