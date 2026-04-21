@@ -59,12 +59,11 @@ python run_combiner.py --yaml config/k11n22v3.yaml --cpu
 ---
 
 
-## Running on Google Colab (for the free T4 GPU)
+## Running on Google Colab
 
 
-**Step 1 Change runtime to GPU**
-
-`Runtime → Change runtime type → T4 GPU`
+**Step 1 Use Colab with VScode extension**
+When prompted for kernel sign in with your colab account.
 
 **Step 2 Verify GPU is available**
 
@@ -75,14 +74,10 @@ python run_combiner.py --yaml config/k11n22v3.yaml --cpu
 
 Both should print output. If `nvidia-smi` says command not found, you forgot Step 1.
 
-**Step 3 — Mount Drive and unzip**
+**Step 3 Navigate to the project directory**
 
 ```python
-from google.colab import drive
-drive.mount('/content/drive')
-
-!unzip "/content/drive/MyDrive/<path-to-your-zip>/tbcc-decoder-test.zip" -d /content/
-%cd /content/tbcc-decoder-test
+%cd ./tbcc-decoder-test
 ```
 
 **Step 4 — Install dependencies**
