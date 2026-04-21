@@ -22,7 +22,7 @@ __global__ void accumulate_to_spectrum(
     int max_X = buffer_dim1;
 
     if (x < max_X) {
-        atomicAdd(&spectrum[x], buffer[state_idx * max_X + x]);
+        atomicAdd((unsigned long long*)&spectrum[x], buffer[state_idx * max_X + x]);
     }
 }
 
@@ -158,7 +158,7 @@ __global__ void numba_sharedMem_trellisStep_foldshift(
 
 // foldshift kernel with CGBN
 __global__ void cgbn_sharedMem_trellisStep_foldshift(
-    const bn_mem_t* __restrict__ A_in, int A_dim0, int A_dim1,
+    bn_mem_t* __restrict__ A_in, int A_dim0, int A_dim1,
     const uint8_t* __restrict__ W_in, int W_dim0, int W_dim1,
     const uint32_t* __restrict__ D_in, int D_dim0, int D_dim1,
     bn_mem_t* __restrict__ out, int out_dim0, int out_dim1, int curr_max_weight

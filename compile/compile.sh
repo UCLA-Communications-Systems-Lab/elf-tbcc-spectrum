@@ -6,7 +6,7 @@ OUTPUT_FILE="lib/libtrellis.so"
 echo "Compiling $INPUT_FILE..."
 
 # Create output directory if it doesn't exist
-mkdir -p lib
+mkdir -p ../lib
 
 # for RTX 40-series
 # nvcc -shared -Xcompiler -fPIC -O3 -gencode arch=compute_89,code=sm_89 combiner.cu -o lib/libtrellis.so

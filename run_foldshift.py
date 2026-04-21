@@ -1,4 +1,4 @@
-import os, sys, math, ctypes
+import os, ctypes
 import numpy as np
 import yaml
 from numba import cuda
@@ -8,7 +8,7 @@ from step import trellisStep_shift
 # import the shared library
 lib_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "lib", "libfoldshift.so"))
 if not os.path.exists(lib_path):
-    raise FileNotFoundError(f"Shared library not found: {lib_path}. Run compile.sh first.")
+    raise FileNotFoundError(f"Shared library not found: {lib_path}. Run foldshift_compile.sh first.")
 
 cuda_lib = ctypes.CDLL(lib_path)
 
