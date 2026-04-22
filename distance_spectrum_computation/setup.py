@@ -112,15 +112,7 @@ def setup_A_W_D(path):
     return As, W, D, basis, num_trellis_stages
 
 
-def setup_A_Wbit_D(path):
-
-    try:
-        with open(path, "r") as f:
-            code_config = yaml.safe_load(f)
-        print(f"Successfully loaded: {path}")
-    except FileNotFoundError:
-        print(f"Error: The file '{path}' was not found.")
-        sys.exit(1)
+def setup_A_Wbit_D(code_config):
 
     nu = code_config["tbcc_config"]["V"]
     m = code_config["bch_config"]["M"]

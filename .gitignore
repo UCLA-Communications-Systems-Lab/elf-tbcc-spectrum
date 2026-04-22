@@ -13,6 +13,7 @@ __pycache__/
 # OS / editor artefacts
 .DS_Store
 Thumbs.db
+.vscode/
 
 # Build / compiled artefacts
 *.o

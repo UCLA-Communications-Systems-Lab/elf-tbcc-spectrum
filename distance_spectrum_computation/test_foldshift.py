@@ -1,3 +1,4 @@
+# fmt: off
 import os, ctypes
 import numpy as np
 import yaml
@@ -22,13 +23,14 @@ cuda_lib.launchFoldshiftPipeline.argtypes = [
 ]
 cuda_lib.launchFoldshiftPipeline.restype = None
 
+
 def main():
-    path = "config/k11n22v3.yaml"
+    path = "config/k31n62v6.yaml"
     with open(path, "r") as f:
         code_config = yaml.safe_load(f)
     output_file_name = code_config["output_file_name"]
 
-    As, W_weight, D, basis, num_trellis_stages = setup_A_Wbit_D(path)
+    As, W_weight, D, basis, num_trellis_stages = setup_A_Wbit_D(code_config)
     A_shape = As[0].shape
     O_y, O_x = A_shape
     max_shift_per_stage = 2
