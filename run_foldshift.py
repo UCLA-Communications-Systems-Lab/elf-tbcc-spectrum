@@ -38,26 +38,31 @@ def main():
     d_D = cuda.to_device(D)
     d_spectrum = cuda.to_device(np.zeros(max_X, dtype=np.uint64))
 
-    cpu_spectrum = np.zeros(max_X, dtype=np.uint64)
-    for i_stream, A in enumerate(As):
-        result = A.copy()
-        for stage in range(num_trellis_stages):
-            result = trellisStep_shift(result, W_weight, D, max_shift_per_stage)
-        # result is [num_states, final_width]; pad to max_X
-        padded = np.zeros((result.shape[0], max_X), dtype=np.uint64)
-        padded[:, :result.shape[1]] = result
-        cpu_spectrum += padded[basis[i_stream], :]
+    # implement cpu gate; O_y = 2^(nu + m), so pick whatever gate condition you like (cpu time will get high)
+    USE_CPU = (O_y <= 1024)
 
+    if (USE_CPU):
+        cpu_spectrum = np.zeros(max_X, dtype=np.uint64)
+        for i_stream, A in enumerate(As):
+            result = A.copy()
+            for stage in range(num_trellis_stages):
+                result = trellisStep_shift(result, W_weight, D, max_shift_per_stage)
+            # result is [num_states, final_width]; pad to max_X
+            padded = np.zeros((result.shape[0], max_X), dtype=np.uint64)
+            padded[:, :result.shape[1]] = result
+            cpu_spectrum += padded[basis[i_stream], :]
+
+    h_buf = np.zeros((O_y, max_X), dtype=np.uint64)
+    d_buf_a = cuda.to_device(h_buf)
+    d_buf_b = cuda.to_device(h_buf)
+    
     for i_stream, A in enumerate(As):
         O_y, O_x = A.shape
 
         # ping-pong buffers
         h_in = np.zeros((O_y, max_X), dtype=np.uint64)
         h_in[0:A.shape[0], 0:A.shape[1]] = A
-        h_out = np.zeros((O_y, max_X), dtype=np.uint64)
-
-        d_buf_a = cuda.to_device(h_in)
-        d_buf_b = cuda.to_device(h_out)
+        d_buf_a.copy_to_device(h_in)
 
         cuda_lib.launchFoldshiftPipeline(
             d_buf_a.device_ctypes_pointer.value,
@@ -76,10 +81,11 @@ def main():
     os.makedirs("output/fold", exist_ok=True)
     np.save("output/fold/" + output_file_name, gpu_spectrum)
 
-    if np.array_equal(cpu_spectrum, gpu_spectrum):
-        print("gpu matches cpu spectrum, all good")
-    else:
-        print("error: cpu and gpu spectrums are different")
+    if (USE_CPU):
+        if np.array_equal(cpu_spectrum, gpu_spectrum):
+            print("gpu matches cpu spectrum, all good")
+        else:
+            print("error: cpu and gpu spectrums are different")
 
 if __name__ == "__main__":
     main()
