@@ -27,19 +27,17 @@ cuda_lib.launchFoldshiftPipeline.restype = None
 
 def gen_all_elf_nu6_tbcc():
 
-    # --- 1. ELF Options (8 total) ---
-    # Polynomial M=4 (5 bits): 1 [3 bits freedom] 1
+    # --- 1. ELF Options ---
+    m = 4
     elf_options = []
-    for middle in product([0, 1], repeat=3):
+    for middle in product([0, 1], repeat=m-1):
         poly_str = "1" + "".join(map(str, middle)) + "1"
-        elf_options.append({"K": 11, "N": 15, "M": 4, "polynomial": poly_str})
+        elf_options.append({"K": 11, "N": 15, "M": m, "polynomial": poly_str})
 
-    # --- 2. TBCC Options (nu=6) ---
-    # nu=6 means 7-bit polynomials. 
-    # "5 bits freedom" implies the first and last bits are fixed to 1.
-    # Format: 1 [5 bits freedom] 1
+    # --- 2. TBCC Options ---
+    nu = 7
     tbcc_base_polys = []
-    for freedom_bits in product([0, 1], repeat=5):
+    for freedom_bits in product([0, 1], repeat=nu-1):
         # Construct binary string
         bin_str = "1" + "".join(map(str, freedom_bits)) + "1"
         # Convert binary string to octal string for your config format
@@ -52,7 +50,7 @@ def gen_all_elf_nu6_tbcc():
         tbcc_options.append({
             "K": 15, 
             "N": 30, 
-            "V": 6, 
+            "V": nu, 
             "gen_poly_1": p1, 
             "gen_poly_2": p2
         })
@@ -76,46 +74,54 @@ def gen_all_elf_nu6_tbcc():
     print(f"TBCC Variations: {len(tbcc_options)}")
     print(f"Total Unique Configs: {len(elf_tbcc_configs)}")
     print(elf_tbcc_configs[0])
+    return elf_tbcc_configs
+
+def gen_selected_tbcc_given_bch():
+
+    elf_options = [
+        {"K": 11, "N": 15, "M": 4, "polynomial": "10011"}
+    ]
+
+    tbcc_options = [
+        {"K": 15, "N": 30, "V": 3, "gen_poly_1": "13", "gen_poly_2": "17"},
+        {"K": 15, "N": 30, "V": 4, "gen_poly_1": "27", "gen_poly_2": "31"},
+        {"K": 15, "N": 30, "V": 5, "gen_poly_1": "53", "gen_poly_2": "75"},
+        {"K": 15, "N": 30, "V": 6, "gen_poly_1": "133", "gen_poly_2": "171"},
+        {"K": 15, "N": 30, "V": 7, "gen_poly_1": "247", "gen_poly_2": "371"},
+        {"K": 15, "N": 30, "V": 8, "gen_poly_1": "561", "gen_poly_2": "753"},
+        {"K": 15, "N": 30, "V": 9, "gen_poly_1": "1131", "gen_poly_2": "1537"},
+        {"K": 15, "N": 30, "V": 10, "gen_poly_1": "2473", "gen_poly_2": "3217"},
+        {"K": 15, "N": 30, "V": 11, "gen_poly_1": "4325", "gen_poly_2": "6747"},
+        {"K": 15, "N": 30, "V": 12, "gen_poly_1": "10627", "gen_poly_2": "16765"},
+        {"K": 15, "N": 30, "V": 13, "gen_poly_1": "27251", "gen_poly_2": "37363"},
+        {"K": 15, "N": 30, "V": 14, "gen_poly_1": "75063", "gen_poly_2": "56711"}
+    ]
+
+    elf_tbcc_configs = []
+
+    for b, t in product(elf_options, tbcc_options):
+        # 1. Create the descriptive filename
+        # We prefix with 'b' for BCH/ELF and 't' for TBCC to avoid confusion
+        filename = (
+            f"elf_k{b['K']}_n{t['N']}_m{b['M']}_"
+            f"tbcc_v{t['V']}_g{t['gen_poly_1']}_{t['gen_poly_2']}.npy"
+        )
+        
+        # 2. Store the config along with its filename
+        elf_tbcc_configs.append({
+            "bch_config": b,
+            "tbcc_config": t,
+            "filename": filename
+    })
+    
+    return elf_tbcc_configs
+
 
 def main():
     
     elf_tbcc_configs = gen_all_elf_nu6_tbcc()[:10]
 
-    # elf_options = [
-    #     {"K": 11, "N": 15, "M": 4, "polynomial": "10011"}
-    # ]
 
-    # tbcc_options = [
-    #     {"K": 15, "N": 30, "V": 3, "gen_poly_1": "13", "gen_poly_2": "17"},
-    #     # {"K": 15, "N": 30, "V": 4, "gen_poly_1": "27", "gen_poly_2": "31"},
-    #     # {"K": 15, "N": 30, "V": 5, "gen_poly_1": "53", "gen_poly_2": "75"},
-    #     # {"K": 15, "N": 30, "V": 6, "gen_poly_1": "133", "gen_poly_2": "171"},
-    #     # {"K": 15, "N": 30, "V": 7, "gen_poly_1": "247", "gen_poly_2": "371"},
-    #     # {"K": 15, "N": 30, "V": 8, "gen_poly_1": "561", "gen_poly_2": "753"},
-    #     # {"K": 15, "N": 30, "V": 9, "gen_poly_1": "1131", "gen_poly_2": "1537"},
-    #     # {"K": 15, "N": 30, "V": 10, "gen_poly_1": "2473", "gen_poly_2": "3217"},
-    #     # {"K": 15, "N": 30, "V": 11, "gen_poly_1": "4325", "gen_poly_2": "6747"},
-    #     # {"K": 15, "N": 30, "V": 12, "gen_poly_1": "10627", "gen_poly_2": "16765"},
-    #     # {"K": 15, "N": 30, "V": 13, "gen_poly_1": "27251", "gen_poly_2": "37363"},
-    #     # {"K": 15, "N": 30, "V": 14, "gen_poly_1": "75063", "gen_poly_2": "56711"}
-    # ]
-
-    # elf_tbcc_configs = []
-
-    # for b, t in product(elf_options, tbcc_options):
-    #     # 1. Create the descriptive filename
-    #     # We prefix with 'b' for BCH/ELF and 't' for TBCC to avoid confusion
-    #     filename = (
-    #         f"elf_k{b['K']}_n{t['N']}_m{b['M']}_"
-    #         f"tbcc_v{t['V']}_g{t['gen_poly_1']}_{t['gen_poly_2']}.npy"
-    #     )
-        
-    #     # 2. Store the config along with its filename
-    #     elf_tbcc_configs.append({
-    #         "bch_config": b,
-    #         "tbcc_config": t,
-    #         "filename": filename
-    # })
     
     for code_config in elf_tbcc_configs:
 
