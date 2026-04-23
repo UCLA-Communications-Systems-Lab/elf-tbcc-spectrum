@@ -35,7 +35,7 @@ def gen_all_elf_nu6_tbcc():
         elf_options.append({"K": 11, "N": 15, "M": m, "polynomial": poly_str})
 
     # --- 2. TBCC Options ---
-    nu = 7
+    nu = 8
     tbcc_base_polys = []
     for freedom_bits in product([0, 1], repeat=nu-1):
         # Construct binary string
@@ -119,8 +119,7 @@ def gen_selected_tbcc_given_bch():
 
 def main():
     
-    elf_tbcc_configs = gen_all_elf_nu6_tbcc()[:10]
-
+    elf_tbcc_configs = gen_all_elf_nu6_tbcc()
 
     
     for code_config in elf_tbcc_configs:
