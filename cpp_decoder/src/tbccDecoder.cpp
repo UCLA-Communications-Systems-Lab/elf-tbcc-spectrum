@@ -3,6 +3,7 @@
 #include "../include/mathUtils.h"
 #include "../include/minHeap.h"
 #include <vector>
+#include <cmath>
 
 LowRateListDecoder::LowRateListDecoder(const FeedForwardTrellis &FT,
                                        const CodeInformation &code,

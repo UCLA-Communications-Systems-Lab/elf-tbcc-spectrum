@@ -2,6 +2,9 @@
 #define TBCC_DECODER_H
 
 #include "types.h"
+#include <limits>    // <-- add this
+#include <vector>    // <-- likely needed too for the vectors below
+                     
 class FeedForwardTrellis;
 class MinHeap;
 
