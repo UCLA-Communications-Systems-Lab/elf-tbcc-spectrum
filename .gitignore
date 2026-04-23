@@ -9,6 +9,7 @@ __pycache__/
 
 # Jupyter / notebook artefacts (if any)
 .ipynb_checkpoints/
+*.ipynb
 
 # OS / editor artefacts
 .DS_Store
