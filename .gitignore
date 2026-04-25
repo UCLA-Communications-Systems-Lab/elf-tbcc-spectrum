@@ -22,6 +22,8 @@ Thumbs.db
 *.so
 *.dll
 *.exe
+.cache
+build/
 
 # CUDA artefacts (compiled PTX / cubin)
 *.ptx

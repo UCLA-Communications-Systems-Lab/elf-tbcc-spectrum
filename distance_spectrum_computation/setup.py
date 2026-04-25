@@ -54,6 +54,9 @@ def setup_A_W_D(path):
     poly1 = np.mod(np.convolve(p1, p_crc, mode="full"), 2)
     poly2 = np.mod(np.convolve(p2, p_crc, mode="full"), 2)
 
+    print("poly1: ", poly1)
+    print("poly2: ", poly2)
+
     # states
     states_str = [np.binary_repr(s, width=num_concat_memory) for s in states]
     flipped_states = [s[::-1] for s in states_str]
