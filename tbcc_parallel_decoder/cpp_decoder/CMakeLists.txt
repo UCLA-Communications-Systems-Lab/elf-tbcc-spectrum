@@ -11,7 +11,7 @@ endif()
 
 set(PYBIND11_FINDPYTHON ON)
 
-find_package(Python COMPONENTS Interpreter Development REQUIRED)
+find_package(Python 3.11 COMPONENTS Interpreter Development.Module REQUIRED)
 
 # Auto-detect pybind11 from pip-installed location if not already found
 if(NOT DEFINED pybind11_DIR)

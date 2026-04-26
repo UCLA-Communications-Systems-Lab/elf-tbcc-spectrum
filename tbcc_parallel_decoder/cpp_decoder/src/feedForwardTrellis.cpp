@@ -19,14 +19,17 @@ FeedForwardTrellis::FeedForwardTrellis(const CodeInformation &code)
 }
 
 void FeedForwardTrellis::computeNextStates() {
-  // convert to binary numerators
+  /* convert octal generator polys to binary numerators */
   std::vector<std::vector<int>> bin_numerators(nconv, std::vector<int>(v + 1));
   for (int i = 0; i < nconv; i++) {
-    int tempNum = numerators[i]; // octal number in numerator(135)
+    /* Octal to decimal */
+    int tempNum = numerators[i];
     int decIn = 0;
     std::string in = std::to_string(tempNum);
     for (int p = (in.length() - 1); p >= 0; p--)
       decIn += (int)(in[p] - '0') * pow(8, (in.length() - p - 1));
+
+    /* Decimal to binary */
     for (int j = v; j >= 0; j--) {
       if (decIn % 2 == 0)
         bin_numerators[i][j] = 0;
@@ -35,15 +38,19 @@ void FeedForwardTrellis::computeNextStates() {
       decIn = decIn / 2;
     }
   }
-  // calculate next states and outputs
+
+  /* calculate next states and outputs */
   for (int currentState = 0; currentState < numStates; currentState++) {
-    std::vector<int> mem_elements = dec2Bin(currentState, v + 1);
     for (int input = 0; input < numInputSymbols; input++) {
-      mem_elements[0] = input;
-      std::vector<int> output(nconv);
-      for (int i = 0; i < nconv; i++) {
-        output[i] = 0;
-      }
+
+      // Setup the Register for Output Calculation
+      // We need the binary vector to do the XOR sum based on the polynomials
+      std::vector<int> mem_elements = dec2Bin(currentState, v);
+      // Add the input bit to the end (representing the "newest" bit)
+      mem_elements.push_back(input);
+
+      // Output Computation
+      std::vector<int> output(nconv, 0);
       for (int x_bit = 0; x_bit < nconv; x_bit++) {
         for (int m_bit = 0; m_bit < v + 1; m_bit++) {
           if (bin_numerators[x_bit][m_bit] == 1) {
@@ -52,12 +59,13 @@ void FeedForwardTrellis::computeNextStates() {
         }
       }
       outputs[currentState][input] = bin2Dec(output);
-      std::vector<int> temp(v);
-      for (int i = 0; i < v; i++) {
-        temp[i] = mem_elements[i];
-        // std::cout << temp[i] << std::endl;
-      }
-      nextStates[currentState][input] = bin2Dec(temp);
+
+      // Next State Computation
+      // If State 0 + Input 1 should = State 1:
+      // We shift the current state left and add the new input,
+      // then mask it to the constraint length.
+      int next = ((currentState << 1) | input) & (numStates - 1);
+      nextStates[currentState][input] = next;
     }
   }
 }
@@ -112,7 +120,7 @@ FeedForwardTrellis::encode(const std::vector<int> &originalMessage) const {
         decimal += (originalMessage[i + j] * pow(2, kconv - j - 1));
       }
       std::vector<int> outputBinary =
-          MathUtils::toModulatedPoint(outputs[State][decimal], nconv);
+          MathUtils::toBinary(outputs[State][decimal], nconv);
       State = nextStates[State][decimal];
       for (int j = 0; j < nconv; j++) {
         output.push_back(outputBinary[j]);
