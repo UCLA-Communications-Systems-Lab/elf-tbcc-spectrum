@@ -1,5 +1,7 @@
 from dataclasses import dataclass
 import os, ctypes
+from pathlib import Path
+import h5py
 import numpy as np
 import yaml
 from numba import cuda
@@ -31,6 +33,12 @@ cuda_lib.launchFoldshiftPipeline.argtypes = [
 cuda_lib.launchFoldshiftPipeline.restype = None
 # fmt: on
 
+# Export
+# Output
+output_dir = Path.cwd() / "output"
+output_dir.mkdir(exist_ok=True)
+result_filename = output_dir / "k21n62v5_results.h5"
+
 
 @dataclass
 class dist_spectra:
@@ -53,7 +61,7 @@ def gen_all_elf_tbcc():
         elf_options.append({"K": K_elf, "N": N_elf, "M": m, "polynomial": poly_str})
 
     # --- 2. TBCC Options ---
-    nu = 4
+    nu = 5
     tbcc_base_polys = []
     for freedom_bits in product([0, 1], repeat=nu - 1):
         # Construct binary string
@@ -150,7 +158,6 @@ def main():
     # Initialize winner
     best_dsu_pcw = 1
     best_code_config = elf_tbcc_configs[0]
-    pcw_record = []
 
     for code_config in elf_tbcc_configs:
 
@@ -219,8 +226,25 @@ def main():
 
             # DSU bound computation
             dsub_pcw = dsu(spectra, target_esno_linear)
-            pcw_record.append(dsub_pcw)
+            config_str = (
+                f"BCH_poly{code_config['bch_config']['polynomial']}_"
+                f"TBCC_{code_config['tbcc_config']['gen_poly_1']}_"
+                f"{code_config['tbcc_config']['gen_poly_2']}"
+            )
             # print(f"DSU bound = {dsub_pcw:4e} at EbNo = {target_ebno_dB} dB")
+
+            with h5py.File(result_filename, "a") as f:
+                grp = f.require_group(config_str)
+
+                if "dsub_pcw" in grp:
+                    del grp["dsub_pcw"]
+                if "gpu_spectrum" in grp:
+                    del grp["gpu_spectrum"]
+
+                grp.create_dataset("dsub_pcw", data=dsub_pcw)
+                grp.create_dataset(
+                    "gpu_spectrum", data=gpu_spectrum, compression="gzip"
+                )
 
             # update winner
             if dsub_pcw < best_dsu_pcw:
@@ -231,8 +255,8 @@ def main():
     print(f"Best code_config: {best_code_config}")
 
     # Ouput
-    #   os.makedirs("output/", exist_ok=True)
-    #   np.save("output/" + code_config['filename'], gpu_spectrum)
+    #   os.makedirs(os.getcwd() + "output/", exist_ok=True)
+    #   np.save(os.getcwd() + "output/" + code_config['filename'], gpu_spectrum)
 
 
 if __name__ == "__main__":

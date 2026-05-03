@@ -109,28 +109,33 @@ dsub_5g = dsu(ShortCode_5G, esno_linear)
 dsub_apple = dsu(AppleProp_6G, esno_linear)
 dsub_bestnu6 = dsu(BestNu4, esno_linear)
 
+# SP59
+k11n30_sp59 = np.loadtxt("data/k11n30_sp59.csv", delimiter=",")
+
+# RCU
+k11n30_rcu = np.loadtxt("data/k11n30_rcu.csv", delimiter=",")
 
 fig, ax = plt.subplots(figsize=(7, 5))
 ax.set_yscale("log")
 
-(dsu_crc31,) = plt.semilogy(
-    ebno_dB,
-    dsub_11001,
-    linewidth=1.5,
-    marker="o",
-    markerfacecolor="none",
-    markevery=5,
-    label=r"$g_e(x)=31, A_{6}=45$",
-)
-(dsu_crc37,) = plt.semilogy(
-    ebno_dB,
-    dsub_11111,
-    linewidth=1.5,
-    marker="s",
-    markerfacecolor="none",
-    markevery=5,
-    label=r"$g_e(x)=37, A_{6}=30$",
-)
+# (dsu_crc31,) = plt.semilogy(
+#     ebno_dB,
+#     dsub_11001,
+#     linewidth=1.5,
+#     marker="o",
+#     markerfacecolor="none",
+#     markevery=5,
+#     label=r"$g_e(x)=31, A_{6}=45$",
+# )
+# (dsu_crc37,) = plt.semilogy(
+#     ebno_dB,
+#     dsub_11111,
+#     linewidth=1.5,
+#     marker="s",
+#     markerfacecolor="none",
+#     markevery=5,
+#     label=r"$g_e(x)=37, A_{6}=30$",
+# )
 
 (dsu_crc23,) = plt.semilogy(
     ebno_dB,
@@ -139,7 +144,7 @@ ax.set_yscale("log")
     marker="D",
     markerfacecolor="none",
     markevery=5,
-    label=r"$g_e(x)=23, A_{8}=30$",
+    label=r"$g_e(x)=23, g_1=133, g_2=171, A_{8}=30$",
 )
 
 (dsu_etsi,) = plt.semilogy(
@@ -158,7 +163,7 @@ ax.set_yscale("log")
     marker="*",
     markerfacecolor="none",
     markevery=5,
-    label=r"Best Nu=4 Code, $A_{10}=138$",
+    label=r"$g_e=23, g_1=23, g_2=25, A_{10}=138$",
 )
 (dsu_apple,) = plt.semilogy(
     ebno_dB,
@@ -167,23 +172,45 @@ ax.set_yscale("log")
     marker="p",
     markerfacecolor="none",
     markevery=5,
-    label=r"Apple 6G proposal, $A_{10}=66$",
+    label=r"Apple proposal, $A_{10}=66$",
+)
+(sp59,) = plt.semilogy(
+    k11n30_sp59[:, 1],
+    k11n30_sp59[:, 3],
+    linewidth=1.5,
+    label=f"Sphere Packing Bound",
 )
 
+(rcu,) = plt.semilogy(
+    k11n30_rcu[:, 1],
+    k11n30_rcu[:, 3],
+    linewidth=1.5,
+    linestyle="--",
+    label=f"Random Coding Union Bound",
+)
+plt.fill_between(
+    k11n30_rcu[:, 1],
+    k11n30_sp59[:, 3],
+    k11n30_rcu[:, 3],
+    color="skyblue",
+    alpha=0.4,
+    label="Area Between",
+)
 
-dsu_legend = ax.legend(
+legend = ax.legend(
     handles=[
-        dsu_crc31,
-        dsu_crc37,
+        rcu,
         dsu_crc23,
         dsu_etsi,
         dsu_bestnu4,
         dsu_apple,
+        sp59,
     ],
-    loc="lower left",
+    loc="upper right",
     fontsize=12,
+    framealpha=0.5,
 )
-ax.add_artist(dsu_legend)
+ax.add_artist(legend)
 
 
 plt.grid(True, which="both", linestyle="--", linewidth=0.5)
@@ -191,6 +218,5 @@ plt.xlim([4, 9])
 plt.ylim([1e-9, 1e-2])
 plt.xlabel(r"$\frac{E_b}{N_o} (\mathrm{dB})$", fontsize=15)
 plt.ylabel(r"Probability of codeword error, $P_{cw}$", fontsize=15)
-# plt.legend(fontsize=12)
 plt.tight_layout()
 plt.show()
