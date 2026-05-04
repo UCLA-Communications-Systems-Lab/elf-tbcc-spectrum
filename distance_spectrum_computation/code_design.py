@@ -9,6 +9,7 @@ from setup import setup_A_Wbit_D
 from step import trellisStep_shift
 from itertools import product, combinations
 from dsu_bound_plots.bounds import dsu
+import argparse
 
 # import the shared library
 lib_path = os.path.abspath(
@@ -37,7 +38,6 @@ cuda_lib.launchFoldshiftPipeline.restype = None
 # Output
 output_dir = Path.cwd() / "output"
 output_dir.mkdir(exist_ok=True)
-result_filename = output_dir / "k21n62v5_results.h5"
 
 
 @dataclass
@@ -46,22 +46,16 @@ class dist_spectra:
     num_cwds: np.array
 
 
-def gen_all_elf_tbcc():
-
-    K_elf = 21
-    N_elf = 31
+def gen_all_elf_tbcc(K_elf, N_elf, m, N_tbcc, nu):
     K_tbcc = N_elf
-    N_tbcc = 62
 
     # --- 1. ELF Options ---
-    m = 10
     elf_options = []
     for middle in product([0, 1], repeat=m - 1):
         poly_str = "1" + "".join(map(str, middle)) + "1"
         elf_options.append({"K": K_elf, "N": N_elf, "M": m, "polynomial": poly_str})
 
     # --- 2. TBCC Options ---
-    nu = 5
     tbcc_base_polys = []
     for freedom_bits in product([0, 1], repeat=nu - 1):
         # Construct binary string
@@ -134,26 +128,29 @@ def gen_selected_tbcc_given_bch():
     return elf_tbcc_configs
 
 
-def main():
+def main(config_path: str):
+    with open(config_path, "r") as f:
+        config = yaml.safe_load(f)
 
-    elf_tbcc_configs = gen_all_elf_tbcc()
     example_config = {
-        "bch_config": {"K": 21, "N": 31, "M": 10, "polynomial": "11101101001"},
-        "tbcc_config": {
-            "K": 31,
-            "N": 62,
-            "V": 6,
-            "gen_poly_1": "133",
-            "gen_poly_2": "171",
-        },
+        "bch_config": config["bch_config"],
+        "tbcc_config": config["tbcc_config"]
     }
+    
+    result_filename = output_dir / config.get("output_file_name", "results.npy")
+
+    K_elf = config["bch_config"]["K"]
+    N_elf = config["bch_config"]["N"]
+    m = config["bch_config"]["M"]
+    N_tbcc = config["tbcc_config"]["N"]
+    nu = config["tbcc_config"]["V"]
+
+    elf_tbcc_configs = gen_all_elf_tbcc(K_elf, N_elf, m, N_tbcc, nu)
     elf_tbcc_configs.append(example_config)
 
     target_ebno_dB = 5
     target_ebno_linear = 10 ** (0.1 * target_ebno_dB)
-    target_esno_linear = target_ebno_linear * (
-        example_config["bch_config"]["K"] / example_config["tbcc_config"]["N"]
-    )
+    target_esno_linear = target_ebno_linear * (K_elf / N_tbcc)
 
     # Initialize winner
     best_dsu_pcw = 1
@@ -260,4 +257,7 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("config", type = str, help = "Path to YAML config file")
+    args = parser.parse_args()
+    main(args.config)
