@@ -34,7 +34,6 @@ cuda_lib.launchFoldshiftPipeline.argtypes = [
 cuda_lib.launchFoldshiftPipeline.restype = None
 # fmt: on
 
-# Export
 # Output
 output_dir = Path.cwd() / "output"
 output_dir.mkdir(exist_ok=True)
@@ -87,7 +86,6 @@ def gen_all_elf_tbcc(K_elf, N_elf, m, N_tbcc, nu):
     print(f"ELF Variations: {len(elf_options)}")
     print(f"TBCC Variations: {len(tbcc_options)}")
     print(f"Total Unique Configs: {len(elf_tbcc_configs)}")
-    print(elf_tbcc_configs[0])
     return elf_tbcc_configs
 
 
@@ -134,10 +132,17 @@ def main(config_path: str):
 
     example_config = {
         "bch_config": config["bch_config"],
-        "tbcc_config": config["tbcc_config"]
+        "tbcc_config": config["tbcc_config"],
     }
-    
-    result_filename = output_dir / config.get("output_file_name", "results.npy")
+    print(f"Example config: {example_config}")
+
+    # Clean and concise
+    file_path = (
+        output_dir / config.get("output_file_name", "rename_needed")
+    ).with_suffix(".h5")
+    with h5py.File(file_path, "w") as f:
+        pass
+    print(f"Writing results to {file_path}")
 
     K_elf = config["bch_config"]["K"]
     N_elf = config["bch_config"]["N"]
@@ -148,7 +153,7 @@ def main(config_path: str):
     elf_tbcc_configs = gen_all_elf_tbcc(K_elf, N_elf, m, N_tbcc, nu)
     elf_tbcc_configs.append(example_config)
 
-    target_ebno_dB = 5
+    target_ebno_dB = config["target_EbNo_dB"]
     target_ebno_linear = 10 ** (0.1 * target_ebno_dB)
     target_esno_linear = target_ebno_linear * (K_elf / N_tbcc)
 
@@ -156,7 +161,10 @@ def main(config_path: str):
     best_dsu_pcw = 1
     best_code_config = elf_tbcc_configs[0]
 
-    for code_config in elf_tbcc_configs:
+    for i, code_config in enumerate(elf_tbcc_configs):
+
+        if i % 1000 == 0:
+            print(f"Config id: {i}")
 
         As, W_weight, D, basis, num_trellis_stages = setup_A_Wbit_D(code_config)
         A_shape = As[0].shape
@@ -230,7 +238,7 @@ def main(config_path: str):
             )
             # print(f"DSU bound = {dsub_pcw:4e} at EbNo = {target_ebno_dB} dB")
 
-            with h5py.File(result_filename, "a") as f:
+            with h5py.File(file_path, "a") as f:
                 grp = f.require_group(config_str)
 
                 if "dsub_pcw" in grp:
@@ -251,13 +259,9 @@ def main(config_path: str):
     print(f"Best DSU P_cw: {best_dsu_pcw:4e}")
     print(f"Best code_config: {best_code_config}")
 
-    # Ouput
-    #   os.makedirs(os.getcwd() + "output/", exist_ok=True)
-    #   np.save(os.getcwd() + "output/" + code_config['filename'], gpu_spectrum)
-
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("config", type = str, help = "Path to YAML config file")
+    parser.add_argument("config", type=str, help="Path to YAML config file")
     args = parser.parse_args()
     main(args.config)
