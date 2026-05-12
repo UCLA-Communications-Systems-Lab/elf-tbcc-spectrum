@@ -18,7 +18,7 @@ SRC_CGBN := distance_spectrum_cgbn.cu
 CONFIG ?=
 K_VAL = $(shell python3 -c "import yaml; print(yaml.safe_load(open('$(CONFIG)'))['bch_config']['K'])")
 
-.PHONY: all clean run compile check_config
+.PHONY: all clean run compile check_config compile-kernel compile-cgbn
 
 all: run
 
@@ -28,13 +28,17 @@ ifndef CONFIG
 endif
 
 compile: check_config | $(LIB_DIR)
-	@if [ $(K_VAL) -gt 64 ]; then \
-		echo "K = $(K_VAL) > 64, compiling CGBN kernel"; \
-		$(CXX) $(CXXFLAGS) $(GENCODE) -I$(CGBN_INCLUDE) $(GMP_LIB) $(SRC_CGBN) -o $(LIB); \
-	else \
-		echo "K = $(K_VAL) <= 64, compiling regular kernel"; \
-		$(CXX) $(CXXFLAGS) $(GENCODE) $(SRC_STD) -o $(LIB); \
-	fi
+    @if [ $(K_VAL) -gt 64 ]; then \
+        $(MAKE) compile-cgbn; \
+    else \
+        $(MAKE) compile-kernel; \
+    fi
+
+compile-kernel:
+	$(CXX) $(CXXFLAGS) $(GENCODE) $(SRC_STD) -o $(LIB)
+
+compile-cgbn:
+	(CXX) $(CXXFLAGS) $(GENCODE) -I$(CGBN_INCLUDE) $(GMP_LIB) $(SRC_CGBN) -o $(LIB)
 
 run: compile
 	@if [ $(K_VAL) -gt 64 ]; then \
