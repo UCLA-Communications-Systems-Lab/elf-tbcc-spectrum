@@ -38,7 +38,7 @@ compile-kernel:
 	$(CXX) $(CXXFLAGS) $(GENCODE) $(SRC_STD) -o $(LIB)
 
 compile-cgbn:
-	(CXX) $(CXXFLAGS) $(GENCODE) -I$(CGBN_INCLUDE) $(GMP_LIB) $(SRC_CGBN) -o $(LIB)
+	$(CXX) $(CXXFLAGS) $(GENCODE) -I$(CGBN_INCLUDE) $(GMP_LIB) $(SRC_CGBN) -o $(LIB)
 
 run: compile
 	@if [ $(K_VAL) -gt 64 ]; then \
