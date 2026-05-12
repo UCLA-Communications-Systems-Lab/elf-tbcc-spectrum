@@ -5,6 +5,7 @@ import yaml
 from numba import cuda
 from setup import setup_A_Wbit_D
 from step import trellisStep_shift
+import argparse
 
 # import the shared library
 lib_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "lib", "libfoldshift.so"))
@@ -24,8 +25,7 @@ cuda_lib.launchFoldshiftPipeline.argtypes = [
 cuda_lib.launchFoldshiftPipeline.restype = None
 
 
-def main():
-    path = "config/k31n62v6.yaml"
+def main(path):
     with open(path, "r") as f:
         code_config = yaml.safe_load(f)
     output_file_name = code_config["output_file_name"]
@@ -90,4 +90,8 @@ def main():
             print("error: cpu and gpu spectrums are different")
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("config", help = "path to YAML config file")
+    args = parser.parse_args()
+    path = args.config
+    main(path)
