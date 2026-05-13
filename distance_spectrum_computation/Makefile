@@ -1,11 +1,11 @@
 CXX = nvcc
 CXXFLAGS := -shared -Xcompiler -fPIC -O3
 GENCODE := -gencode arch=compute_75,code=sm_75 \
-		   -gencode arch=compute_89,code=sm_89 \
-		   -gencode arch=compute_89,code=compute_89
+	-gencode arch=compute_89,code=sm_89 \
+	-gencode arch=compute_89,code=compute_89
 
 # parent directory containing the cgbn folder
-CGBN_INCLUDE ?= /usr/local/include
+CGBN_INCLUDE ?= /content/CGBN/include
 GMP_LIB := -lgmp
 
 SRC_DIR := compile
@@ -28,11 +28,11 @@ ifndef CONFIG
 endif
 
 compile: check_config | $(LIB_DIR)
-    @if [ $(K_VAL) -gt 64 ]; then \
-        $(MAKE) compile-cgbn; \
-    else \
-        $(MAKE) compile-kernel; \
-    fi
+	@if [ $(K_VAL) -gt 64 ]; then \
+		$(MAKE) compile-cgbn; \
+	else \
+		$(MAKE) compile-kernel; \
+	fi
 
 compile-kernel:
 	$(CXX) $(CXXFLAGS) $(GENCODE) $(SRC_STD) -o $(LIB)
