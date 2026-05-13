@@ -5,7 +5,7 @@ GENCODE := -gencode arch=compute_75,code=sm_75 \
            -gencode arch=compute_89,code=sm_89 \
            -gencode arch=compute_89,code=compute_89
 
-# parent directory containing the cgbn folder
+# parent directory containing the cgbn folder (may need to modify if not using colab)
 CGBN_INCLUDE ?= /content/CGBN/include
 GMP_LIB := -lgmp
 
