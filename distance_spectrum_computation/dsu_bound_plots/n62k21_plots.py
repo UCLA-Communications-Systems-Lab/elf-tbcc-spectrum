@@ -61,6 +61,18 @@ k21n62v4_best_dist_spectra = dist_spectra(
     0, 0, 0]
     ),
 )
+
+k21n62v5_best_dist_spectra = dist_spectra(
+    hamming_dist=np.arange(63),
+    num_cwds=np.array([
+    1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 
+    62, 310, 930, 2046, 4278, 8742, 15128, 27993, 
+    46035, 62682, 91574, 131564, 163308, 183706, 200012, 
+    217435, 211482, 178746, 153326, 131502, 98518, 65162, 
+    42655, 28303, 16213, 8246, 4154, 1736, 744, 310, 
+    124, 93, 31, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+]),
+)
 # fmt: on
 
 N = 62
@@ -79,6 +91,7 @@ es_over_sigma_sqrd_dB = 10 * np.log10(es_over_sigma_sqrd_linear)
 ## - bounds
 dsub_k21n62 = dsu(k21n62_bob_ds, esno_linear)
 dsub_k21n62v4_best = dsu(k21n62v4_best_dist_spectra, esno_linear)
+dsub_k21n62v5_best = dsu(k21n62v5_best_dist_spectra, esno_linear)
 
 # SP59
 k21n62_sp59 = np.loadtxt("data/k21n62_sp59.csv", delimiter=",")
@@ -96,7 +109,7 @@ ax.set_yscale("log")
     markerfacecolor="none",
     linewidth=1.5,
     markevery=5,
-    label=r"$g_e(x)=3551, g_1=133, g_2=171, A_{16}=217$",
+    label=r"$m=10, g_e=3551, \nu=6, g_1=133, g_2=171, A_{16}=217$",
 )
 (dsub_best_nu4,) = plt.semilogy(
     ebno_dB,
@@ -105,7 +118,16 @@ ax.set_yscale("log")
     markerfacecolor="none",
     linewidth=1.5,
     markevery=5,
-    label=r"$g_e(x)=3013, g_1=23, g_2=35, A_{16}=93$",
+    label=r"$m=10, g_e=3013, \nu=4, g_1=23, g_2=35, A_{16}=93$",
+)
+(dsub_best_nu5,) = plt.semilogy(
+    ebno_dB,
+    dsub_k21n62v5_best,
+    marker="o",
+    markerfacecolor="none",
+    linewidth=1.5,
+    markevery=5,
+    label=r"$m=10, g_e=3557, \nu=5, g_1=53, g_2=75, A_{16}=62$",
 )
 (sp59,) = plt.semilogy(
     k21n62_sp59[:, 1],
@@ -135,6 +157,7 @@ legend = ax.legend(
         rcu,
         dsub62,
         dsub_best_nu4,
+        dsub_best_nu5,
         sp59,
     ],
     loc="upper right",

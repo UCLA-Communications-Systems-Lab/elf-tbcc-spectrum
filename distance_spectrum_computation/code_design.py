@@ -50,9 +50,12 @@ def gen_all_elf_tbcc(K_elf, N_elf, m, N_tbcc, nu):
 
     # --- 1. ELF Options ---
     elf_options = []
-    for middle in product([0, 1], repeat=m - 1):
-        poly_str = "1" + "".join(map(str, middle)) + "1"
-        elf_options.append({"K": K_elf, "N": N_elf, "M": m, "polynomial": poly_str})
+    if m > 0:
+        for middle in product([0, 1], repeat=m - 1):
+            poly_str = "1" + "".join(map(str, middle)) + "1"
+            elf_options.append({"K": K_elf, "N": N_elf, "M": m, "polynomial": poly_str})
+    else:
+        elf_options.append({"K": K_elf, "N": N_elf, "M": m, "polynomial": "1"})
 
     # --- 2. TBCC Options ---
     tbcc_base_polys = []

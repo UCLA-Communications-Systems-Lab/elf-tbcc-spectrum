@@ -1,8 +1,8 @@
 bch_config:
-  K: 11
+  K: 15
   N: 15
-  M: 4
-  polynomial: "10011"
+  M: 0
+  polynomial: "1"
 
 
 tbcc_config:

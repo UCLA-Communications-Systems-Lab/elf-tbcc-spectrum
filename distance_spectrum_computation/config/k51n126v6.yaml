@@ -11,8 +11,3 @@ tbcc_config:
   V: 6
   gen_poly_1: "133"
   gen_poly_2: "171"
-
-output_file_name: "k51n126v6_dist_spectrum.npy"
-
-# Metadata
-version: 1.0

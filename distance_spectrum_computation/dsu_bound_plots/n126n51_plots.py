@@ -107,7 +107,7 @@ ax.set_yscale("log")
     markerfacecolor="none",
     linewidth=1.5,
     markevery=2,
-    label=r"$g_e(x)=13071, g_1=133, g_2=171, A_{16}=52$",
+    label=r"$m=12, g_e(x)=13071, \nu=6, g_1=133, g_2=171, A_{16}=52$",
 )
 (dsubv8,) = plt.semilogy(
     ebno_dB,
@@ -116,7 +116,7 @@ ax.set_yscale("log")
     markerfacecolor="none",
     linewidth=1.5,
     markevery=2,
-    label=r"$g_e(x)=13071, g_1=561, g_2=753, A_{18}=4$",
+    label=r"$m=12, g_e(x)=13071, \nu=8, g_1=561, g_2=753, A_{18}=4$",
 )
 (sp59,) = plt.semilogy(
     k51n126_sp59[:, 1],

@@ -28,7 +28,9 @@ cuda_lib.launchFoldshiftPipeline.restype = None
 def main(path):
     with open(path, "r") as f:
         code_config = yaml.safe_load(f)
-    output_file_name = code_config["output_file_name"]
+    base_filename = f"k{code_config["bch_config"]["K"]}n{code_config["tbcc_config"]["N"]}v{code_config["tbcc_config"]["V"]}"
+    spectra_filename = f"{base_filename}_dist_spectrum.npy"
+    
 
     As, W_weight, D, basis, num_trellis_stages = setup_A_Wbit_D(code_config)
     A_shape = As[0].shape
@@ -81,7 +83,7 @@ def main(path):
     gpu_spectrum = d_spectrum.copy_to_host()
     print("gpu_distance_spectrum:", gpu_spectrum)
     os.makedirs("output/fold", exist_ok=True)
-    np.save("output/fold/" + output_file_name, gpu_spectrum)
+    np.save("output/fold/" + spectra_filename, gpu_spectrum)
 
     if (USE_CPU):
         if np.array_equal(cpu_spectrum, gpu_spectrum):

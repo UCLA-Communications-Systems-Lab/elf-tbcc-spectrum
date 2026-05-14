@@ -13,4 +13,3 @@ tbcc_config:
   gen_poly_2: "753"
 
 target_EbNo_dB: 6.5
-output_file_name: "k11n30v8_results"

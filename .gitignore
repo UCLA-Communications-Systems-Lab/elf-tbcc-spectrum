@@ -11,6 +11,9 @@ __pycache__/
 .ipynb_checkpoints/
 test.ipynb
 
+# Large data files
+data/
+
 # OS / editor artefacts
 .DS_Store
 Thumbs.db

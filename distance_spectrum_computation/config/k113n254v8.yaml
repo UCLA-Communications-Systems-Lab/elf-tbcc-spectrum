@@ -11,8 +11,3 @@ tbcc_config:
   V: 8
   gen_poly_1: "561"
   gen_poly_2: "753"
-
-output_file_name: "k113n254v8_dist_spectrum.npy"
-
-# Metadata
-version: 1.0

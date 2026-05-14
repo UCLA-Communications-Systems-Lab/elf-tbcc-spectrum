@@ -85,6 +85,12 @@ CRC_10011 = dist_spectra(
     num_cwds=np.array([1, 0, 30, 108, 300, 585, 585, 300, 108, 30, 0, 1]),
     dmin=8,
 )
+ELF_10101 = dist_spectra(
+    crc="10101",
+    hamming_dist=hamming_distance,
+    num_cwds=np.array([1, 0, 20, 103, 360, 561, 511, 361, 100, 31, 0, 0]),
+    dmin=8,
+)
 # fmt: on
 
 
@@ -103,11 +109,10 @@ es_over_sigma_sqrd_dB = 10 * np.log10(es_over_sigma_sqrd_linear)
 
 ## - bounds
 dsub_10011 = dsu(CRC_10011, esno_linear)
-dsub_11001 = dsu(CRC_11001, esno_linear)
-dsub_11111 = dsu(CRC_11111, esno_linear)
+dsub_10101 = dsu(ELF_10101, esno_linear)
 dsub_5g = dsu(ShortCode_5G, esno_linear)
 dsub_apple = dsu(AppleProp_6G, esno_linear)
-dsub_bestnu6 = dsu(BestNu4, esno_linear)
+dsub_bestnu4 = dsu(BestNu4, esno_linear)
 
 # SP59
 k11n30_sp59 = np.loadtxt("data/k11n30_sp59.csv", delimiter=",")
@@ -118,24 +123,15 @@ k11n30_rcu = np.loadtxt("data/k11n30_rcu.csv", delimiter=",")
 fig, ax = plt.subplots(figsize=(7, 5))
 ax.set_yscale("log")
 
-# (dsu_crc31,) = plt.semilogy(
-#     ebno_dB,
-#     dsub_11001,
-#     linewidth=1.5,
-#     marker="o",
-#     markerfacecolor="none",
-#     markevery=5,
-#     label=r"$g_e(x)=31, A_{6}=45$",
-# )
-# (dsu_crc37,) = plt.semilogy(
-#     ebno_dB,
-#     dsub_11111,
-#     linewidth=1.5,
-#     marker="s",
-#     markerfacecolor="none",
-#     markevery=5,
-#     label=r"$g_e(x)=37, A_{6}=30$",
-# )
+(dsu_elf25,) = plt.semilogy(
+    ebno_dB,
+    dsub_10101,
+    linewidth=1.5,
+    marker="o",
+    markerfacecolor="none",
+    markevery=5,
+    label=r"$m=4, g_e=25, \nu=6, g_1=133, g_2=171, A_{8}=20$",
+)
 
 (dsu_crc23,) = plt.semilogy(
     ebno_dB,
@@ -144,7 +140,7 @@ ax.set_yscale("log")
     marker="D",
     markerfacecolor="none",
     markevery=5,
-    label=r"$g_e(x)=23, g_1=133, g_2=171, A_{8}=30$",
+    label=r"$m=4, g_e=23, \nu=6, g_1=133, g_2=171, A_{8}=30$",
 )
 
 (dsu_etsi,) = plt.semilogy(
@@ -158,12 +154,12 @@ ax.set_yscale("log")
 )
 (dsu_bestnu4,) = plt.semilogy(
     ebno_dB,
-    dsub_bestnu6,
+    dsub_bestnu4,
     linewidth=1.5,
     marker="*",
     markerfacecolor="none",
     markevery=5,
-    label=r"$g_e=23, g_1=23, g_2=25, A_{10}=138$",
+    label=r"$m=4, g_e=23, \nu=4, g_1=23, g_2=25, A_{10}=138$",
 )
 (dsu_apple,) = plt.semilogy(
     ebno_dB,
@@ -201,6 +197,7 @@ legend = ax.legend(
     handles=[
         rcu,
         dsu_crc23,
+        dsu_elf25,
         dsu_etsi,
         dsu_bestnu4,
         dsu_apple,

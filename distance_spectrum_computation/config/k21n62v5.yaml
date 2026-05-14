@@ -8,8 +8,8 @@ bch_config:
 tbcc_config:
   K: 31
   N: 62
-  V: 6
-  gen_poly_1: "133"
-  gen_poly_2: "171"
+  V: 5
+  gen_poly_1: "53"
+  gen_poly_2: "75"
 
 target_EbNo_dB: 5
