@@ -114,8 +114,8 @@ def main(path):
         gpu_spectrum.append(val)
 
     print("gpu_distance_spectrum:", gpu_spectrum)
-    os.makedirs("output/fold", exist_ok=True)
-    np.save("output/fold/" + spectra_filename, gpu_spectrum)
+    os.makedirs("output/cgbn_out", exist_ok=True)
+    np.save("output/cgbn_out/" + spectra_filename, gpu_spectrum)
 
     if (USE_CPU):
         print(cpu_spectrum)

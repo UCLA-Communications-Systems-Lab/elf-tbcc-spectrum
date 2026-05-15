@@ -1,8 +1,9 @@
 CXX = nvcc
 CXXFLAGS := -shared -Xcompiler -fPIC -O3
 GENCODE := -gencode arch=compute_75,code=sm_75 \
-	-gencode arch=compute_89,code=sm_89 \
-	-gencode arch=compute_89,code=compute_89
+           -gencode arch=compute_80,code=sm_80 \
+           -gencode arch=compute_89,code=sm_89 \
+           -gencode arch=compute_89,code=compute_89
 
 # parent directory containing the cgbn folder
 CGBN_INCLUDE ?= /content/CGBN/include
