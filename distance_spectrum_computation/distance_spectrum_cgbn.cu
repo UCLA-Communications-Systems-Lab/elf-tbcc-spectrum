@@ -261,11 +261,33 @@ extern "C" void launchCGBNPipeline (
 
     bn_mem_t* d_bn_buffer_a;
     bn_mem_t* d_bn_buffer_b;
-    cudaMalloc(&d_bn_buffer_a, sizeof(bn_mem_t) * num_states * max_X);
-    cudaMalloc(&d_bn_buffer_b, sizeof(bn_mem_t) * num_states * max_X);
+    size_t allocation_size = sizeof(bn_mem_t) * num_states * max_X;
+
+    cudaError_t err;
+    printf("[CGBN] allocating two buffers of %.2f GB each", allocation_size / 1e9);
+
+    err = cudaMalloc(&d_bn_buffer_a, allocation_size);
+    if (err != cudaSuccess) {
+        printf("[CGBN] cudaMalloc failed to allocate buffer_a, err: %s\n", cudaGetErrorString(err));
+        return;
+    }
+
+    err = cudaMalloc(&d_bn_buffer_b, allocation_size);
+    if (err != cudaSuccess) {
+        printf("[CGBN] cudaMalloc failed to allocate buffer_a, err: %s\n", cudaGetErrorString(err));
+        cudaFree(d_bn_buffer_a);
+        return;
+    }
 
     // load d_buffer_a into cgbn memory
     pack_u64_to_bn<<<blocks_for_conversion, threads_for_conversion>>>(d_buffer_a, d_bn_buffer_a, num_states * max_X, uint64_per_value);
+    err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        printf("[CGBN] packing data into big numbers failed, err: %s\n", cudaGetErrorString());
+        cudaFree(d_bn_buffer_a);
+        cudaFree(d_bn_buffer_b);
+        return;
+    }
 
     // for ping-pong enabling
     bn_mem_t* d_bn_in = d_bn_buffer_a;
@@ -284,6 +306,15 @@ extern "C" void launchCGBNPipeline (
             d_bn_out, num_states, max_X,
             curr_max_weight
         );
+
+        err = cudaGetLastError();
+        if (err != cudaSuccess) {
+            printf("[CGBN] foldshift kernel failed, err %s\n", cudaGetErrorString(err));
+            cudaFree(d_bn_buffer_a);
+            cudaFree(d_bn_buffer_b);
+            return;
+        }
+
         curr_max_weight += max_shift_per_stage;
         // alternate buffers
         bn_mem_t* tmp = d_bn_in; d_bn_in = d_bn_out; d_bn_out = tmp;
@@ -297,14 +328,18 @@ extern "C" void launchCGBNPipeline (
 
     err = cudaGetLastError();
     if (err != cudaSuccess) {
-        printf("[CGBN Error] distance spectrum accumulate kernel failed, err: %s\n", cudaGetErrorString(err));
+        printf("[CGBN] distance spectrum accumulate kernel failed, err: %s\n", cudaGetErrorString(err));
         cudaFree(d_bn_buffer_a);
         cudaFree(d_bn_buffer_b);
-        return -1;
+        return;
     }
 
     cudaFree(d_bn_buffer_a);
     cudaFree(d_bn_buffer_b);
 
-    cudaDeviceSynchronize();
+    err = cudaDeviceSynchronize();
+    if (err != cudaSuccess) {
+        printf("[CGBN] device synchronization failed, err: %s\n", cudaGetErrorString(err));
+        return;
+    }
 }
