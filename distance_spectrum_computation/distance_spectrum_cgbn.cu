@@ -283,7 +283,7 @@ extern "C" void launchCGBNPipeline (
     pack_u64_to_bn<<<blocks_for_conversion, threads_for_conversion>>>(d_buffer_a, d_bn_buffer_a, num_states * max_X, uint64_per_value);
     err = cudaGetLastError();
     if (err != cudaSuccess) {
-        printf("[CGBN] packing data into big numbers failed, err: %s\n", cudaGetErrorString());
+        printf("[CGBN] packing data into big numbers failed, err: %s\n", cudaGetErrorString(err));
         cudaFree(d_bn_buffer_a);
         cudaFree(d_bn_buffer_b);
         return;
