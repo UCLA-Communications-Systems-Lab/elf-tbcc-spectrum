@@ -15,13 +15,12 @@ if not os.path.exists(lib_path):
 cuda_lib = ctypes.CDLL(lib_path)
 
 cuda_lib.launchCGBNPipeline.argtypes = [
-    ctypes.c_void_p,
+    ctypes.c_int,                                # starting_state
     ctypes.c_int, ctypes.c_int,                  # num_states, initial_max_weight
     ctypes.c_void_p, ctypes.c_int, ctypes.c_int, # d_W, W_dim0, W_dim1
     ctypes.c_void_p, ctypes.c_int, ctypes.c_int, # d_D, D_dim0, D_dim1
     ctypes.c_int, ctypes.c_int, ctypes.c_int,    # stages, shift, max_X
     ctypes.c_int, ctypes.c_void_p,               # basis_state, d_spectrum
-    ctypes.c_int,                                # uint64_per_value
 ]
 cuda_lib.launchCGBNPipeline.restype = None
 
@@ -74,36 +73,20 @@ def main(path):
             padded[:, :result.shape[1]] = result
             cpu_spectrum += padded[basis[i_stream], :]
 
-    # compute number of uint64_ts we need to pack contiguously to fit k
-    # e.g., if k = 113, we need a uint128, or two uint64_ts contiguously
-    # ceil(K / 64)
-    needed_bits = (code_config["bch_config"]["K"] + 1)
-    uint64_per_value = (needed_bits + 63) // 64;
-    assert CGBN_Bits >= needed_bits
-
-    h_buf = np.zeros((O_y, max_X, uint64_per_value), dtype=np.uint64)
-    d_buf_a = cuda.to_device(h_buf.reshape(-1))
+    assert CGBN_Bits >= code_config["bch_config"]["K"] + 1
 
     for i_stream, A in enumerate(As):
         O_y, O_x = A.shape
-
-        # ping-pong buffers
-        # size = 2^(num_states) * max_X (n + 1) * sizeof(CGBN)
-        # for k113n254v8, M = 14, size = 16.32 GB approx if we keep CGBN as 128 bit int :(
-        h_in = np.zeros((O_y, max_X, uint64_per_value), dtype=np.uint64) 
-        h_in[0:A.shape[0], 0:A.shape[1], 0] = A
-
-        d_buf_a.copy_to_device(h_in.reshape(-1))
+        starting_state = int(np.nonzero(A)[0][0]);
 
         cuda_lib.launchCGBNPipeline(
-            d_buf_a.device_ctypes_pointer.value,
+            starting_state,
             O_y, O_x,
             d_W.device_ctypes_pointer.value, W_weight.shape[0], W_weight.shape[1],
             d_D.device_ctypes_pointer.value, D.shape[0], D.shape[1],
             num_trellis_stages, max_shift_per_stage, max_X,
             int(basis[i_stream]),
             d_spectrum.device_ctypes_pointer.value,
-            uint64_per_value
         )
 
     cuda.synchronize()

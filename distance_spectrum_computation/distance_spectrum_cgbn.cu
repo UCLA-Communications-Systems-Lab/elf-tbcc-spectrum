@@ -218,46 +218,16 @@ __global__ void cgbn_sharedMem_trellisStep_foldshift(
     }
 }
 
-__global__ void pack_u64_to_bn(const uint64_t* src_buffer, bn_mem_t* dst_buffer, int n, int uint64_per_value) {
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx < n) {
-        int limbs = BITS / 32;
-        for (int i = 0; i < limbs; i++) {
-            dst_buffer[idx]._limbs[i] = 0;
-        }
-        // ceil(# of uint32 / 2) = # of uint64
-        int max_uint64 = (limbs + 1) / 2;
-
-        // if we only want to fit in 2-3 uint64_ts, then we limit ourselves to that amount
-        // else, if uint64_per_value >= max_uint64 (maximum number of uint64s we can fit inside our bit width)
-        // then we take the max_uint64 count
-        int uint64_copy_count = (uint64_per_value < max_uint64) ? uint64_per_value : max_uint64;
-        for (int i = 0; i < uint64_copy_count; i++) {
-            uint64_t val = src_buffer[idx * uint64_per_value + i];
-            int current_limb = i * 2;
-            dst_buffer[idx]._limbs[current_limb] = (uint32_t)(val & 0xFFFFFFFF);
-
-            if (current_limb + 1 < limbs) {
-                dst_buffer[idx]._limbs[current_limb + 1] = (uint32_t)(val >> 32); 
-            }
-        }
-    }
-}
-
 // launch wrapper so we can have python driver 
 extern "C" void launchCGBNPipeline (
-    uint64_t* d_buffer_a,
+    int starting_state,
     int num_states, int initial_max_weight,
     const uint8_t* d_W, int W_dim0, int W_dim1,
     const uint32_t* d_D, int D_dim0, int D_dim1,
     int num_trellis_stages, int max_shift_per_stage, int max_X,
-    int basis_state, bn_mem_t* d_spectrum, int uint64_per_value
+    int basis_state, bn_mem_t* d_spectrum
 ) {
     int curr_max_weight = initial_max_weight;
-
-    // kernel dims for launching of u64_to_bn
-    int threads_for_conversion = 256;
-    int blocks_for_conversion = ((max_X * num_states) + threads_for_conversion - 1) / threads_for_conversion;
 
     bn_mem_t* d_bn_buffer_a;
     bn_mem_t* d_bn_buffer_b;
@@ -266,26 +236,20 @@ extern "C" void launchCGBNPipeline (
     cudaError_t err;
     printf("[CGBN] allocating two buffers of %.2f GB each", allocation_size / 1e9);
 
-    err = cudaMalloc(&d_bn_buffer_a, allocation_size);
+    err = cudaMallocManaged(&d_bn_buffer_a, allocation_size);
     if (err != cudaSuccess) {
         printf("[CGBN] cudaMalloc failed to allocate buffer_a, err: %s\n", cudaGetErrorString(err));
         return;
     }
 
-    err = cudaMalloc(&d_bn_buffer_b, allocation_size);
+    cudaMemset(d_bn_buffer_a, 0, allocation_size);
+    uint32_t one_value = 1;
+    cudaMemcpy(&d_bn_buffer_a[starting_state * max_X]._limbs[0], &one_value, sizeof(uint32_t), cudaMemcpyHostToDevice);
+
+    err = cudaMallocManaged(&d_bn_buffer_b, allocation_size);
     if (err != cudaSuccess) {
         printf("[CGBN] cudaMalloc failed to allocate buffer_a, err: %s\n", cudaGetErrorString(err));
         cudaFree(d_bn_buffer_a);
-        return;
-    }
-
-    // load d_buffer_a into cgbn memory
-    pack_u64_to_bn<<<blocks_for_conversion, threads_for_conversion>>>(d_buffer_a, d_bn_buffer_a, num_states * max_X, uint64_per_value);
-    err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        printf("[CGBN] packing data into big numbers failed, err: %s\n", cudaGetErrorString(err));
-        cudaFree(d_bn_buffer_a);
-        cudaFree(d_bn_buffer_b);
         return;
     }
 
