@@ -66,7 +66,8 @@ __global__ void cgbn_sharedMem_trellisStep_foldshift(
 
     uint32_t num_states = A_dim0;
 
-    uint32_t y = blockIdx.y * blockDim.y + threadIdx.y;
+    uint32_t block_y = blockIdx.x * gridDim.y + blockIdx.y;
+    uint32_t y = block_y * blockDim.y + threadIdx.y;
     uint32_t z = blockIdx.z * blockDim.z + threadIdx.z;
 
     uint32_t bs_x = blockDim.x;
@@ -231,10 +232,10 @@ extern "C" void launchCGBNPipeline (
 
     bn_mem_t* d_bn_buffer_a;
     bn_mem_t* d_bn_buffer_b;
-    size_t allocation_size = sizeof(bn_mem_t) * num_states * max_X;
+    size_t allocation_size = (size_t)sizeof(bn_mem_t) * (size_t)num_states * (size_t)max_X;
 
     cudaError_t err;
-    printf("[CGBN] allocating two buffers of %.2f GB each", allocation_size / 1e9);
+    printf("[CGBN] allocating two buffers of %.2f GB each\n", allocation_size / 1e9);
 
     err = cudaMallocManaged(&d_bn_buffer_a, allocation_size);
     if (err != cudaSuccess) {
@@ -257,11 +258,17 @@ extern "C" void launchCGBNPipeline (
     bn_mem_t* d_bn_in = d_bn_buffer_a;
     bn_mem_t* d_bn_out = d_bn_buffer_b;
 
+    int total_blocks_y = (num_states / 2 + 31) / 32;
+    int max_cuda_grid_dim = 65535;
+
+    int grid_x = (total_blocks_y + max_cuda_grid_dim - 1) / max_cuda_grid_dim;
+    int grid_y = (total_blocks_y + grid_x - 1) / grid_x;
+
     for (int stage = 0; stage < num_trellis_stages; ++stage) {
         cudaMemset(d_bn_out, 0, sizeof(bn_mem_t) * num_states * max_X);
  
         dim3 block(32, 32, 1);
-        dim3 grid(1, (num_states / 2 + 31) / 32, W_dim1);
+        dim3 grid(grid_x, grid_y, W_dim1);
  
         cgbn_sharedMem_trellisStep_foldshift<<<grid, block>>>(
             d_bn_in, num_states, max_X,
