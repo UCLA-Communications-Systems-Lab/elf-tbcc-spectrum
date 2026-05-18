@@ -5,8 +5,8 @@
 
 // threads per instance (4, 8, 16, or 32)
 // number of threads that handle each integer (multiple threads are required for larger ints)
-#define TPI 8
-#define BITS 256
+#define TPI 4
+#define BITS 128
 #define INSTANCES_PER_WARP (32 / TPI)
 
 typedef cgbn_context_t<TPI> context_t;
@@ -66,7 +66,6 @@ __global__ void cgbn_sharedMem_trellisStep_foldshift(
 
     uint32_t num_states = A_dim0;
 
-    uint32_t x = blockIdx.x * blockDim.x + threadIdx.x;
     uint32_t y = blockIdx.y * blockDim.y + threadIdx.y;
     uint32_t z = blockIdx.z * blockDim.z + threadIdx.z;
 
@@ -295,6 +294,14 @@ extern "C" void launchCGBNPipeline (
     cgbn_accumulate_to_spectrum<<<accumulate_blocks, accumulate_threads>>>(
         d_bn_in, num_states, max_X, basis_state, d_spectrum
     );
+
+    err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        printf("[CGBN Error] distance spectrum accumulate kernel failed, err: %s\n", cudaGetErrorString(err));
+        cudaFree(d_bn_buffer_a);
+        cudaFree(d_bn_buffer_b);
+        return -1;
+    }
 
     cudaFree(d_bn_buffer_a);
     cudaFree(d_bn_buffer_b);
