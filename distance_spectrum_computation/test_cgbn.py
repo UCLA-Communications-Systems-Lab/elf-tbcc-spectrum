@@ -96,7 +96,17 @@ def main(path):
         val = sum(int(raw_limb_spectrum[i * CGBN_Limbs + j]) << (32 * j) for j in range(CGBN_Limbs))
         gpu_spectrum.append(val)
 
+    K = code_config["bch_config"]["K"]
+    N = code_config["tbcc_config"]["N"]
     print("gpu_distance_spectrum:", gpu_spectrum)
+
+    # asserts
+    if (len(gpu_spectrum) != (N + 1)):
+        print("ERROR: GPU SPECTRUM LENGTH DOESN'T MATCH EXPECTED LENGTH")
+    
+    if (sum(gpu_spectrum) != (2 ** K)):
+        print("ERROR: GPU SPECTRUM SUM DOES NOT ADD UP TO 2^K")
+
     os.makedirs("output/cgbn_out", exist_ok=True)
     np.save("output/cgbn_out/" + spectra_filename, gpu_spectrum)
 
