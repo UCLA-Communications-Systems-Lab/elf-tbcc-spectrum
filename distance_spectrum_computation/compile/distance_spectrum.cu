@@ -147,16 +147,30 @@ __global__ void numba_sharedMem_trellisStep_foldshift(
 
 // launch wrapper so we can have python driver 
 extern "C" void launchFoldshiftPipeline (
-    uint64_t* d_buffer_a, uint64_t* d_buffer_b,
+    int starting_state,
     int num_states, int initial_max_weight,
     const uint8_t* d_W, int W_dim0, int W_dim1,
     const uint32_t* d_D, int D_dim0, int D_dim1,
     int num_trellis_stages, int max_shift_per_stage, int max_X,
     int basis_state, uint64_t* d_spectrum
 ) {
+    int curr_max_weight = initial_max_weight;
+
+    uint64_t* d_buffer_a;
+    uint64_t* d_buffer_b;
+    size_t allocation_size = (size_t)sizeof(uint64_t) * (size_t)max_X * (size_t)(num_states);
+
+    cudaMalloc(&d_buffer_a, allocation_size);
+    cudaMalloc(&d_buffer_b, allocation_size);
+
+    cudaMemset(d_buffer_a, 0, allocation_size);
+    cudaMemset(d_buffer_b, 0, allocation_size);
+
+    uint64_t one_value = 1;
+    cudaMemcpy(&d_buffer_a[starting_state * max_X], &one_value, sizeof(uint64_t), cudaMemcpyHostToDevice);
+
     uint64_t* d_in = d_buffer_a;
     uint64_t* d_out = d_buffer_b;
-    int curr_max_weight = initial_max_weight;
  
     for (int stage = 0; stage < num_trellis_stages; ++stage) {
         cudaMemset(d_out, 0, sizeof(uint64_t) * num_states * max_X);
@@ -182,6 +196,9 @@ extern "C" void launchFoldshiftPipeline (
         d_in, num_states, max_X, basis_state, d_spectrum
     );
     cudaDeviceSynchronize();
+
+    cudaFree(d_buffer_a);
+    cudaFree(d_buffer_b);
 }
 
 /*
