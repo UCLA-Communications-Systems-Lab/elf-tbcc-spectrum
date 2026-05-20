@@ -58,7 +58,7 @@ def main(path):
     
     for i_stream, A in enumerate(As):
         O_y, O_x = A.shape
-        starting_state = int(np.nonzero(A)[0][0]);
+        starting_state = int(np.nonzero(A)[0][0])
 
         cuda_lib.launchFoldshiftPipeline(
             starting_state,

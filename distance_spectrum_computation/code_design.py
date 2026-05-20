@@ -24,7 +24,7 @@ cuda_lib = ctypes.CDLL(lib_path)
 
 # fmt: off
 cuda_lib.launchFoldshiftPipeline.argtypes = [
-    ctypes.c_void_p, ctypes.c_void_p,            # d_buffer_a, d_buffer_b
+    ctypes.c_int,                                # starting_state
     ctypes.c_int, ctypes.c_int,                  # num_states, initial_max_weight
     ctypes.c_void_p, ctypes.c_int, ctypes.c_int, # d_W, W_dim0, W_dim1
     ctypes.c_void_p, ctypes.c_int, ctypes.c_int, # d_D, D_dim0, D_dim1
@@ -193,21 +193,12 @@ def main(config_path: str):
                 padded[:, : result.shape[1]] = result
                 cpu_spectrum += padded[basis[i_stream], :]
 
-        h_buf = np.zeros((O_y, max_X), dtype=np.uint64)
-        d_buf_a = cuda.to_device(h_buf)
-        d_buf_b = cuda.to_device(h_buf)
-
         for i_stream, A in enumerate(As):
             O_y, O_x = A.shape
-
-            # ping-pong buffers
-            h_in = np.zeros((O_y, max_X), dtype=np.uint64)
-            h_in[0 : A.shape[0], 0 : A.shape[1]] = A
-            d_buf_a.copy_to_device(h_in)
+            starting_state = int(np.nonzero(A)[0][0])
 
             cuda_lib.launchFoldshiftPipeline(
-                d_buf_a.device_ctypes_pointer.value,
-                d_buf_b.device_ctypes_pointer.value,
+                starting_state,
                 O_y,
                 O_x,
                 d_W.device_ctypes_pointer.value,
