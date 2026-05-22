@@ -20,6 +20,16 @@ PYBIND11_MODULE(cpp_tbcc_decoder, m) {
       // Note: 'numerators' must be readonly because it's const in C++!
       .def_readonly("numerators", &CodeInformation::numerators);
 
+  py::class_<MessageInformation>(m, "MessageInformation")
+      .def(py::init<>())
+      .def_readwrite("message", &MessageInformation::message)
+      .def_readwrite("codeword", &MessageInformation::codeword)
+      .def_readwrite("path", &MessageInformation::path)
+      .def_readwrite("listSize", &MessageInformation::listSize)
+      .def_readwrite("TBListSize", &MessageInformation::TBListSize)
+      .def_readwrite("listSizeExceeded", &MessageInformation::listSizeExceeded)
+      .def_readwrite("metric", &MessageInformation::metric);
+
   // Bind the Class
   py::class_<LowRateListDecoder>(m, "LowRateListDecoder")
       .def(py::init<const FeedForwardTrellis &, const CodeInformation &, int>(),
