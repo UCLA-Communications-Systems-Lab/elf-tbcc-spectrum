@@ -6,29 +6,13 @@ from cpu_combiner import MetaStage, reduce_tree, best_tailbiting_state, tracebac
 
 N_REPS = 20
 
-def run_cpu_bench(left: np.ndarray, right: np.ndarray, reps=N_REPS):
-    stages = build_stages(left, right)
-    reduce_tree(stages) # warm-up
+def bench(fn, *args, reps=N_REPS):
+    fn(*args)  # warm-up
     times = []
     for _ in range(reps):
         t0 = time.perf_counter()
-        reduce_tree(stages)
+        fn(*args)
         times.append((time.perf_counter() - t0) * 1000)
-    return np.mean(times), np.min(times), np.max(times)
-
-
-def run_cuda_bench(left: np.ndarray, right: np.ndarray, M: int, reps=N_REPS):
-    from utils.cuda_driver import launch_reduce_tree_cuda
-    
-    # warm-up
-    launch_reduce_tree_cuda(left, right, M)
-    
-    times = []
-    for _ in range(reps):
-        # The GPU now executes the full reduction tree
-        _, kernel_ms = launch_reduce_tree_cuda(left, right, M)
-        times.append(kernel_ms)
-        
     return np.mean(times), np.min(times), np.max(times)
 
 
@@ -61,16 +45,14 @@ def run_cpu(left: np.ndarray, right: np.ndarray):
 
 
 def run_cuda(left: np.ndarray, right: np.ndarray, M: int):
-    from utils.cuda_driver import launch_reduce_tree_cuda
+    from utils.cuda_driver import launch_combine_cuda
     
     # keep original stages for traceback
     original_stages = build_stages(left, right)
     
-    # The GPU now returns the single final reduced stage
-    final_tensor, _ = launch_reduce_tree_cuda(left, right, M)
-    
-    stages = tensors_to_metastages(final_tensor)
-    final = stages[0]
+    combined, _ = launch_combine_cuda(left, right, M)
+    stages = tensors_to_metastages(combined)
+    final = reduce_tree(stages)
     best_state, best_metric = best_tailbiting_state(final)
     
     # traceback on original stages, same as CPU
@@ -95,7 +77,7 @@ def main():
     print("-" * 52)
 
     # CPU path
-    mean_cpu, min_cpu, max_cpu = run_cpu_bench(left, right, reps=args.reps)
+    mean_cpu, min_cpu, max_cpu = bench(run_cpu, left, right, reps=args.reps)
     final_cpu, best_state_cpu, best_metric_cpu, path_cpu = run_cpu(left, right)
 
     print(f"CPU (tree reduce)")
@@ -106,10 +88,10 @@ def main():
 
     if not args.cpu:
         try:
-            mean_cuda, min_cuda, max_cuda = run_cuda_bench(left, right, M, reps=args.reps)
+            mean_cuda, min_cuda, max_cuda = bench(run_cuda, left, right, M, reps=args.reps)
             final_cuda, best_state_cuda, best_metric_cuda, path_cuda = run_cuda(left, right, M)
 
-            print(f"\nCUDA (Full GPU Reduction Tree, excluding data transfer overhead)")
+            print(f"\nCUDA (GPU combines + tree reduce)")
             print(f"  mean: {mean_cuda:.3f} ms   min: {min_cuda:.3f} ms   max: {max_cuda:.3f} ms")
             print(f"  speedup (mean): {mean_cpu/mean_cuda:.2f}x")
             print(f"  best state:  {best_state_cuda}")
