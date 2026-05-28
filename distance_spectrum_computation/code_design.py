@@ -139,9 +139,10 @@ def main(config_path: str):
     }
     print(f"Example config: {example_config}")
 
-    # Clean and concise
+    # Output filename
+    base_filename = f"k{config["bch_config"]["K"]}n{config["tbcc_config"]["N"]}v{config["tbcc_config"]["V"]}"
     file_path = (
-        output_dir / config.get("output_file_name", "rename_needed")
+        base_filename, "rename_needed"
     ).with_suffix(".h5")
     with h5py.File(file_path, "w") as f:
         pass
