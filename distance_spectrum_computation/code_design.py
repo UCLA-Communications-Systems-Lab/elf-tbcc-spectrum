@@ -141,9 +141,7 @@ def main(config_path: str):
 
     # Output filename
     base_filename = f"k{config["bch_config"]["K"]}n{config["tbcc_config"]["N"]}v{config["tbcc_config"]["V"]}"
-    file_path = (
-        base_filename, "rename_needed"
-    ).with_suffix(".h5")
+    file_path = Path(f"{base_filename}").with_suffix(".h5")
     with h5py.File(file_path, "w") as f:
         pass
     print(f"Writing results to {file_path}")
