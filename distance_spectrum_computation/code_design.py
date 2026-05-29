@@ -102,12 +102,12 @@ def gen_all_elf_tbcc(K_elf, N_elf, m, N_tbcc, nu):
     skipped_polys = 0
     elf_tbcc_configs = []
     for b, t in product(elf_options, tbcc_options):
-        # elf_oct = oct(int(b["polynomial"], 2))[2:]
-        # key = triple(elf_oct, t["gen_poly_1"], t["gen_poly_2"], m, nu)
-        # if key in symmetric_polys:
-        #     skipped_polys += 1
-        #     continue
-        # symmetric_polys.add(key)
+        elf_oct = oct(int(b["polynomial"], 2))[2:]
+        key = triple(elf_oct, t["gen_poly_1"], t["gen_poly_2"], m, nu)
+        if key in symmetric_polys:
+            skipped_polys += 1
+            continue
+        symmetric_polys.add(key)
 
         # Filename now includes the specific ELF polynomial string
         filename = (
