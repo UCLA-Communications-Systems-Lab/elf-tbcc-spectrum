@@ -44,6 +44,24 @@ class dist_spectra:
     hamming_dist: np.array
     num_cwds: np.array
 
+def gcd_gf2(a, b):
+    # gcd(a, b) = gcd(b, a mod b)
+    while b:
+        if a.bit_length() >= b.bit_length():
+            a ^= b << (a.bit_length() - b.bit_length())
+        else:
+            a, b = b, a
+    return a
+
+def reverse_polynomial(p_octal, num_bits):
+    p_int = int(p_octal, 8)
+    reversed_p = int(format(p_int, f'0{num_bits}b')[::-1], 2)
+    return oct(reversed_p)[2:]
+
+def triple(elf_octal, p1, p2, m, nu):
+    triple = (elf_octal, *sorted([p1, p2]))
+    reversed_triple = (reverse_polynomial(elf_octal, m + 1), *sorted([reverse_polynomial(p1, nu + 1), reverse_polynomial(p2, nu + 1)]))
+    return min(triple, reversed_triple)
 
 def gen_all_elf_tbcc(K_elf, N_elf, m, N_tbcc, nu):
     K_tbcc = N_elf
@@ -68,14 +86,29 @@ def gen_all_elf_tbcc(K_elf, N_elf, m, N_tbcc, nu):
 
     # Order doesn't matter, and p1 != p2: 32C2 = 496 combinations
     tbcc_options = []
+    num_skipped = 0
     for p1, p2 in combinations(tbcc_base_polys, 2):
+        if gcd_gf2(int(p1, 8), int(p2, 8)) != 1:
+            num_skipped += 1
+            continue
+
         tbcc_options.append(
             {"K": K_tbcc, "N": N_tbcc, "V": nu, "gen_poly_1": p1, "gen_poly_2": p2}
         )
+    print(f"Skipped {num_skipped} catastrophic combinations.")
 
     # --- 3. Enumerate All Combinations ---
+    symmetric_polys = set()
+    skipped_polys = 0
     elf_tbcc_configs = []
     for b, t in product(elf_options, tbcc_options):
+        # elf_oct = oct(int(b["polynomial"], 2))[2:]
+        # key = triple(elf_oct, t["gen_poly_1"], t["gen_poly_2"], m, nu)
+        # if key in symmetric_polys:
+        #     skipped_polys += 1
+        #     continue
+        # symmetric_polys.add(key)
+
         # Filename now includes the specific ELF polynomial string
         filename = (
             f"elf_p{b['polynomial']}_"
@@ -86,6 +119,7 @@ def gen_all_elf_tbcc(K_elf, N_elf, m, N_tbcc, nu):
             {"bch_config": b, "tbcc_config": t, "filename": filename}
         )
 
+    print(f"Skipped Polynomials (symmetric): {skipped_polys}")
     print(f"ELF Variations: {len(elf_options)}")
     print(f"TBCC Variations: {len(tbcc_options)}")
     print(f"Total Unique Configs: {len(elf_tbcc_configs)}")
