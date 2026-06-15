@@ -44,6 +44,7 @@ class dist_spectra:
     hamming_dist: np.array
     num_cwds: np.array
 
+
 def gcd_gf2(a, b):
     # gcd(a, b) = gcd(b, a mod b)
     while b:
@@ -53,15 +54,21 @@ def gcd_gf2(a, b):
             a, b = b, a
     return a
 
+
 def reverse_polynomial(p_octal, num_bits):
     p_int = int(p_octal, 8)
-    reversed_p = int(format(p_int, f'0{num_bits}b')[::-1], 2)
+    reversed_p = int(format(p_int, f"0{num_bits}b")[::-1], 2)
     return oct(reversed_p)[2:]
+
 
 def triple(elf_octal, p1, p2, m, nu):
     triple = (elf_octal, *sorted([p1, p2]))
-    reversed_triple = (reverse_polynomial(elf_octal, m + 1), *sorted([reverse_polynomial(p1, nu + 1), reverse_polynomial(p2, nu + 1)]))
+    reversed_triple = (
+        reverse_polynomial(elf_octal, m + 1),
+        *sorted([reverse_polynomial(p1, nu + 1), reverse_polynomial(p2, nu + 1)]),
+    )
     return min(triple, reversed_triple)
+
 
 def gen_all_elf_tbcc(K_elf, N_elf, m, N_tbcc, nu):
     K_tbcc = N_elf
@@ -149,7 +156,6 @@ def gen_selected_tbcc_given_bch():
 
     for b, t in product(elf_options, tbcc_options):
         # 1. Create the descriptive filename
-        # We prefix with 'b' for BCH/ELF and 't' for TBCC to avoid confusion
         filename = (
             f"elf_k{b['K']}_n{t['N']}_m{b['M']}_"
             f"tbcc_v{t['V']}_g{t['gen_poly_1']}_{t['gen_poly_2']}.npy"
@@ -163,7 +169,7 @@ def gen_selected_tbcc_given_bch():
     return elf_tbcc_configs
 
 
-def main(config_path: str):
+def main(config_path: str, batch_idx: int, batch_size: int):
     with open(config_path, "r") as f:
         config = yaml.safe_load(f)
 
@@ -173,13 +179,6 @@ def main(config_path: str):
     }
     print(f"Example config: {example_config}")
 
-    # Output filename
-    base_filename = f"k{config["bch_config"]["K"]}n{config["tbcc_config"]["N"]}v{config["tbcc_config"]["V"]}"
-    file_path = Path(f"output/{base_filename}").with_suffix(".h5")
-    with h5py.File(file_path, "w") as f:
-        pass
-    print(f"Writing results to {file_path}")
-
     K_elf = config["bch_config"]["K"]
     N_elf = config["bch_config"]["N"]
     m = config["bch_config"]["M"]
@@ -188,6 +187,37 @@ def main(config_path: str):
 
     elf_tbcc_configs = gen_all_elf_tbcc(K_elf, N_elf, m, N_tbcc, nu)
     elf_tbcc_configs.append(example_config)
+
+    total_configs = len(elf_tbcc_configs)
+
+    # --- Slicing logic for large configuration sets ---
+    if total_configs > batch_size:
+        start_idx = batch_idx * batch_size
+        end_idx = min(start_idx + batch_size, total_configs)
+
+        if start_idx >= total_configs:
+            print(
+                f"Requested batch_idx {batch_idx} is out of bounds for total configs {total_configs}."
+            )
+            return
+
+        print(
+            f"Total configs ({total_configs}) > limit ({batch_size}). Processing batch {batch_idx}: elements [{start_idx} to {end_idx-1}]"
+        )
+        elf_tbcc_configs = elf_tbcc_configs[start_idx:end_idx]
+
+        # Adjust base filename so concurrent runs don't overwrite or block the same HDF5 file
+        base_filename = f"k{K_elf}n{N_tbcc}v{nu}_batch{batch_idx}"
+    else:
+        print(
+            f"Total configs ({total_configs}) is within the threshold limit. Running all configs."
+        )
+        base_filename = f"k{K_elf}n{N_tbcc}v{nu}_all"
+
+    file_path = Path(f"output/{base_filename}").with_suffix(".h5")
+    with h5py.File(file_path, "w") as f:
+        pass
+    print(f"Writing results to {file_path}")
 
     target_ebno_dB = config["target_EbNo_dB"]
     target_ebno_linear = 10 ** (0.1 * target_ebno_dB)
@@ -200,7 +230,7 @@ def main(config_path: str):
     for i, code_config in enumerate(elf_tbcc_configs):
 
         if i % 1000 == 0:
-            print(f"Config id: {i}")
+            print(f"Local Batch Processed: {i}/{len(elf_tbcc_configs)}")
 
         As, W_weight, D, basis, num_trellis_stages = setup_A_Wbit_D(code_config)
         A_shape = As[0].shape
@@ -212,7 +242,7 @@ def main(config_path: str):
         d_D = cuda.to_device(D)
         d_spectrum = cuda.to_device(np.zeros(max_X, dtype=np.uint64))
 
-        # implement cpu gate; O_y = 2^(nu + m), so pick whatever gate condition you like (cpu time will get high)
+        # implement cpu gate
         USE_CPU = O_y <= 1024
 
         if USE_CPU:
@@ -221,7 +251,6 @@ def main(config_path: str):
                 result = A.copy()
                 for stage in range(num_trellis_stages):
                     result = trellisStep_shift(result, W_weight, D, max_shift_per_stage)
-                # result is [num_states, final_width]; pad to max_X
                 padded = np.zeros((result.shape[0], max_X), dtype=np.uint64)
                 padded[:, : result.shape[1]] = result
                 cpu_spectrum += padded[basis[i_stream], :]
@@ -249,21 +278,18 @@ def main(config_path: str):
 
         cuda.synchronize()
         gpu_spectrum = d_spectrum.copy_to_host()
-        # print("gpu_distance_spectrum:", gpu_spectrum)
 
         if gpu_spectrum[0] == 1:  # only consider "good" codes
             spectra = dist_spectra(
                 num_cwds=gpu_spectrum, hamming_dist=np.arange(len(gpu_spectrum))
             )
 
-            # DSU bound computation
             dsub_pcw = dsu(spectra, target_esno_linear)
             config_str = (
                 f"BCH_poly{code_config['bch_config']['polynomial']}_"
                 f"TBCC_{code_config['tbcc_config']['gen_poly_1']}_"
                 f"{code_config['tbcc_config']['gen_poly_2']}"
             )
-            # print(f"DSU bound = {dsub_pcw:4e} at EbNo = {target_ebno_dB} dB")
 
             with h5py.File(file_path, "a") as f:
                 grp = f.require_group(config_str)
@@ -278,17 +304,27 @@ def main(config_path: str):
                     "gpu_spectrum", data=gpu_spectrum, compression="gzip"
                 )
 
-            # update winner
             if dsub_pcw < best_dsu_pcw:
                 best_dsu_pcw = dsub_pcw
                 best_code_config = code_config
 
-    print(f"Best DSU P_cw: {best_dsu_pcw:4e}")
-    print(f"Best code_config: {best_code_config}")
+    print(f"Batch {batch_idx} Completed.")
+    print(f"Best DSU P_cw in this batch: {best_dsu_pcw:4e}")
+    print(f"Best code_config in this batch: {best_code_config}")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("config", type=str, help="Path to YAML config file")
+    parser.add_argument(
+        "--batch_idx", type=int, default=0, help="Which 10k chunk to run (0, 1, 2...)"
+    )
+    parser.add_argument(
+        "--batch_size",
+        type=int,
+        default=10000,
+        help="Maximum size of configurations evaluated per script call",
+    )
     args = parser.parse_args()
-    main(args.config)
+
+    main(args.config, args.batch_idx, args.batch_size)
