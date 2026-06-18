@@ -133,42 +133,6 @@ def gen_all_elf_tbcc(K_elf, N_elf, m, N_tbcc, nu):
     return elf_tbcc_configs
 
 
-def gen_selected_tbcc_given_bch():
-
-    elf_options = [{"K": 11, "N": 15, "M": 4, "polynomial": "10011"}]
-
-    tbcc_options = [
-        {"K": 15, "N": 30, "V": 3, "gen_poly_1": "13", "gen_poly_2": "17"},
-        {"K": 15, "N": 30, "V": 4, "gen_poly_1": "27", "gen_poly_2": "31"},
-        {"K": 15, "N": 30, "V": 5, "gen_poly_1": "53", "gen_poly_2": "75"},
-        {"K": 15, "N": 30, "V": 6, "gen_poly_1": "133", "gen_poly_2": "171"},
-        {"K": 15, "N": 30, "V": 7, "gen_poly_1": "247", "gen_poly_2": "371"},
-        {"K": 15, "N": 30, "V": 8, "gen_poly_1": "561", "gen_poly_2": "753"},
-        {"K": 15, "N": 30, "V": 9, "gen_poly_1": "1131", "gen_poly_2": "1537"},
-        {"K": 15, "N": 30, "V": 10, "gen_poly_1": "2473", "gen_poly_2": "3217"},
-        {"K": 15, "N": 30, "V": 11, "gen_poly_1": "4325", "gen_poly_2": "6747"},
-        {"K": 15, "N": 30, "V": 12, "gen_poly_1": "10627", "gen_poly_2": "16765"},
-        {"K": 15, "N": 30, "V": 13, "gen_poly_1": "27251", "gen_poly_2": "37363"},
-        {"K": 15, "N": 30, "V": 14, "gen_poly_1": "75063", "gen_poly_2": "56711"},
-    ]
-
-    elf_tbcc_configs = []
-
-    for b, t in product(elf_options, tbcc_options):
-        # 1. Create the descriptive filename
-        filename = (
-            f"elf_k{b['K']}_n{t['N']}_m{b['M']}_"
-            f"tbcc_v{t['V']}_g{t['gen_poly_1']}_{t['gen_poly_2']}.npy"
-        )
-
-        # 2. Store the config along with its filename
-        elf_tbcc_configs.append(
-            {"bch_config": b, "tbcc_config": t, "filename": filename}
-        )
-
-    return elf_tbcc_configs
-
-
 def main(config_path: str, batch_idx: int, batch_size: int):
     with open(config_path, "r") as f:
         config = yaml.safe_load(f)
