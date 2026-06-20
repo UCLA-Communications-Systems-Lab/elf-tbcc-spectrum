@@ -73,6 +73,17 @@ k21n62v5_best_dist_spectra = dist_spectra(
     124, 93, 31, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
 ]),
 )
+
+k21n62v6_best_dist_spectra = dist_spectra(
+    hamming_dist=np.arange(63),
+    num_cwds=np.array([
+    1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 
+    93, 0, 1829, 0, 9083, 0, 30845, 0, 86831,
+    0, 191425, 0, 319455, 0, 409014, 0, 409014, 0, 319455, 0,
+    191425, 0, 86831, 0, 30845, 0, 9083, 0, 1829, 0, 93,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1
+]),
+)
 # fmt: on
 
 N = 62
@@ -89,9 +100,10 @@ es_over_sigma_sqrd_linear = esno_linear * 2
 es_over_sigma_sqrd_dB = 10 * np.log10(es_over_sigma_sqrd_linear)
 
 ## - bounds
-dsub_k21n62 = dsu(k21n62_bob_ds, esno_linear)
+# dsub_k21n62 = dsu(k21n62_bob_ds, esno_linear)
 dsub_k21n62v4_best = dsu(k21n62v4_best_dist_spectra, esno_linear)
 dsub_k21n62v5_best = dsu(k21n62v5_best_dist_spectra, esno_linear)
+dsub_k21n62v6_best = dsu(k21n62v6_best_dist_spectra, esno_linear)
 
 # SP59
 k21n62_sp59 = np.loadtxt("data/k21n62_sp59.csv", delimiter=",")
@@ -102,38 +114,12 @@ k21n62_rcu = np.loadtxt("data/k21n62_rcu.csv", delimiter=",")
 fig, ax = plt.subplots(figsize=(7, 5))
 ax.set_yscale("log")
 
-(dsub62,) = plt.semilogy(
-    ebno_dB,
-    dsub_k21n62,
-    marker="o",
-    markerfacecolor="none",
-    linewidth=1.5,
-    markevery=5,
-    label=r"$m=10, g_e=3551, \nu=6, g_1=133, g_2=171, A_{16}=217$",
-)
-(dsub_best_nu4,) = plt.semilogy(
-    ebno_dB,
-    dsub_k21n62v4_best,
-    marker="o",
-    markerfacecolor="none",
-    linewidth=1.5,
-    markevery=5,
-    label=r"$m=10, g_e=3013, \nu=4, g_1=23, g_2=35, A_{16}=93$",
-)
-(dsub_best_nu5,) = plt.semilogy(
-    ebno_dB,
-    dsub_k21n62v5_best,
-    marker="o",
-    markerfacecolor="none",
-    linewidth=1.5,
-    markevery=5,
-    label=r"$m=10, g_e=3557, \nu=5, g_1=53, g_2=75, A_{16}=62$",
-)
+# --- Theoretical Bounds (Custom Colors) ---
 (sp59,) = plt.semilogy(
     k21n62_sp59[:, 1],
     k21n62_sp59[:, 3],
     linewidth=1.5,
-    label=f"Sphere Packing Bound",
+    label="Sphere Packing Bound",
 )
 
 (rcu,) = plt.semilogy(
@@ -141,8 +127,48 @@ ax.set_yscale("log")
     k21n62_rcu[:, 3],
     linewidth=1.5,
     linestyle="--",
-    label=f"Random Coding Union Bound",
+    label="Random Coding Union Bound",
 )
+
+# --- Performance Curves ---
+# (dsub62,) = plt.semilogy(
+#     ebno_dB,
+#     dsub_k21n62,
+#     marker="o",
+#     markerfacecolor="none",
+#     linewidth=1.5,
+#     markevery=5,
+#     label=r"$m=10, g_e=3551, \nu=6, g_1=133, g_2=171, A_{16}=217$",
+# )
+(dsub_best_nu4,) = plt.semilogy(
+    ebno_dB,
+    dsub_k21n62v4_best,
+    marker="d",
+    markerfacecolor="none",
+    linewidth=1.5,
+    markevery=5,
+    label=r"Joint optimization $\nu=4, A_{16}=93$",
+)
+(dsub_best_nu5,) = plt.semilogy(
+    ebno_dB,
+    dsub_k21n62v5_best,
+    marker="s",
+    markerfacecolor="none",
+    linewidth=1.5,
+    markevery=5,
+    label=r"Joint optimization $\nu=5, A_{16}=62$",
+)
+(dsub_best_nu6,) = plt.semilogy(
+    ebno_dB,
+    dsub_k21n62v6_best,
+    marker="o",
+    markerfacecolor="none",
+    linewidth=1.5,
+    markevery=5,
+    label=r"Joint optimization $\nu=6, A_{16}=93$",
+)
+
+
 plt.fill_between(
     k21n62_rcu[:, 1],
     k21n62_sp59[:, 3],
@@ -152,12 +178,13 @@ plt.fill_between(
     label="Area Between",
 )
 
+# Render Legend Order
 legend = ax.legend(
     handles=[
         rcu,
-        dsub62,
         dsub_best_nu4,
         dsub_best_nu5,
+        dsub_best_nu6,
         sp59,
     ],
     loc="upper right",
@@ -166,7 +193,7 @@ legend = ax.legend(
 )
 ax.add_artist(legend)
 
-
+plt.title(rf"Probability of codeword error vs. Eb/No for $({N}, {K})$ $m=10$ ELF-TBCC")
 plt.grid(True, which="both", linestyle="--", linewidth=0.5)
 plt.xlim([2, 7])
 plt.ylim([1e-9, 1e-2])

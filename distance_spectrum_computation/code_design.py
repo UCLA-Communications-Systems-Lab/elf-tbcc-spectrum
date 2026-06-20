@@ -9,6 +9,7 @@ from setup import setup_A_Wbit_D
 from step import trellisStep_shift
 from itertools import product, combinations
 from dsu_bound_plots.bounds import dsu
+from cyclic import divides_xN_minus_1
 import argparse
 
 # import the shared library
@@ -70,7 +71,7 @@ def triple(elf_octal, p1, p2, m, nu):
     return min(triple, reversed_triple)
 
 
-def gen_all_elf_tbcc(K_elf, N_elf, m, N_tbcc, nu):
+def gen_all_elf_tbcc(K_elf, N_elf, m, N_tbcc, nu, cyclic_only=False):
     K_tbcc = N_elf
 
     # --- 1. ELF Options ---
@@ -78,6 +79,11 @@ def gen_all_elf_tbcc(K_elf, N_elf, m, N_tbcc, nu):
     if m > 0:
         for middle in product([0, 1], repeat=m - 1):
             poly_str = "1" + "".join(map(str, middle)) + "1"
+
+            # If the cyclic flag is set, only keep polynomials that divide x^N_elf - 1
+            if cyclic_only and not divides_xN_minus_1(poly_str, N_elf):
+                continue
+
             elf_options.append({"K": K_elf, "N": N_elf, "M": m, "polynomial": poly_str})
     else:
         elf_options.append({"K": K_elf, "N": N_elf, "M": m, "polynomial": "1"})
@@ -85,13 +91,10 @@ def gen_all_elf_tbcc(K_elf, N_elf, m, N_tbcc, nu):
     # --- 2. TBCC Options ---
     tbcc_base_polys = []
     for freedom_bits in product([0, 1], repeat=nu - 1):
-        # Construct binary string
         bin_str = "1" + "".join(map(str, freedom_bits)) + "1"
-        # Convert binary string to octal string for your config format
         octal_val = oct(int(bin_str, 2))[2:]
         tbcc_base_polys.append(octal_val)
 
-    # Order doesn't matter, and p1 != p2: 32C2 = 496 combinations
     tbcc_options = []
     num_skipped = 0
     for p1, p2 in combinations(tbcc_base_polys, 2):
@@ -116,7 +119,6 @@ def gen_all_elf_tbcc(K_elf, N_elf, m, N_tbcc, nu):
             continue
         symmetric_polys.add(key)
 
-        # Filename now includes the specific ELF polynomial string
         filename = (
             f"elf_p{b['polynomial']}_"
             f"tbcc_v{t['V']}_g{t['gen_poly_1']}_{t['gen_poly_2']}.npy"
@@ -133,7 +135,7 @@ def gen_all_elf_tbcc(K_elf, N_elf, m, N_tbcc, nu):
     return elf_tbcc_configs
 
 
-def main(config_path: str, batch_idx: int, batch_size: int):
+def main(config_path: str, batch_idx: int, batch_size: int, cyclic_only: bool):
     with open(config_path, "r") as f:
         config = yaml.safe_load(f)
 
@@ -149,7 +151,10 @@ def main(config_path: str, batch_idx: int, batch_size: int):
     N_tbcc = config["tbcc_config"]["N"]
     nu = config["tbcc_config"]["V"]
 
-    elf_tbcc_configs = gen_all_elf_tbcc(K_elf, N_elf, m, N_tbcc, nu)
+    # Pass the boolean flag down to the code generator matrix function
+    elf_tbcc_configs = gen_all_elf_tbcc(
+        K_elf, N_elf, m, N_tbcc, nu, cyclic_only=cyclic_only
+    )
     elf_tbcc_configs.append(example_config)
 
     total_configs = len(elf_tbcc_configs)
@@ -170,7 +175,6 @@ def main(config_path: str, batch_idx: int, batch_size: int):
         )
         elf_tbcc_configs = elf_tbcc_configs[start_idx:end_idx]
 
-        # Adjust base filename so concurrent runs don't overwrite or block the same HDF5 file
         base_filename = f"k{K_elf}n{N_tbcc}v{nu}_batch{batch_idx}"
     else:
         print(
@@ -187,12 +191,10 @@ def main(config_path: str, batch_idx: int, batch_size: int):
     target_ebno_linear = 10 ** (0.1 * target_ebno_dB)
     target_esno_linear = target_ebno_linear * (K_elf / N_tbcc)
 
-    # Initialize winner
     best_dsu_pcw = 1
     best_code_config = elf_tbcc_configs[0]
 
     for i, code_config in enumerate(elf_tbcc_configs):
-
         if i % 1000 == 0:
             print(f"Local Batch Processed: {i}/{len(elf_tbcc_configs)}")
 
@@ -206,7 +208,6 @@ def main(config_path: str, batch_idx: int, batch_size: int):
         d_D = cuda.to_device(D)
         d_spectrum = cuda.to_device(np.zeros(max_X, dtype=np.uint64))
 
-        # implement cpu gate
         USE_CPU = O_y <= 1024
 
         if USE_CPU:
@@ -243,11 +244,10 @@ def main(config_path: str, batch_idx: int, batch_size: int):
         cuda.synchronize()
         gpu_spectrum = d_spectrum.copy_to_host()
 
-        if gpu_spectrum[0] == 1:  # only consider "good" codes
+        if gpu_spectrum[0] == 1:
             spectra = dist_spectra(
                 num_cwds=gpu_spectrum, hamming_dist=np.arange(len(gpu_spectrum))
             )
-
             dsub_pcw = dsu(spectra, target_esno_linear)
             config_str = (
                 f"BCH_poly{code_config['bch_config']['polynomial']}_"
@@ -257,12 +257,10 @@ def main(config_path: str, batch_idx: int, batch_size: int):
 
             with h5py.File(file_path, "a") as f:
                 grp = f.require_group(config_str)
-
                 if "dsub_pcw" in grp:
                     del grp["dsub_pcw"]
                 if "gpu_spectrum" in grp:
                     del grp["gpu_spectrum"]
-
                 grp.create_dataset("dsub_pcw", data=dsub_pcw)
                 grp.create_dataset(
                     "gpu_spectrum", data=gpu_spectrum, compression="gzip"
@@ -289,6 +287,13 @@ if __name__ == "__main__":
         default=10000,
         help="Maximum size of configurations evaluated per script call",
     )
+    # Added action="store_true" flag so that providing it maps to True, and omitting it defaults to False
+    parser.add_argument(
+        "--cyclic",
+        action="store_true",
+        help="Filter and only evaluate cyclic ELF configuration matrices",
+    )
     args = parser.parse_args()
 
-    main(args.config, args.batch_idx, args.batch_size)
+    # Pass the argument flag to main
+    main(args.config, args.batch_idx, args.batch_size, args.cyclic)
