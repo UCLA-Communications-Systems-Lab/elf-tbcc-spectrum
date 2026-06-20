@@ -8,6 +8,6 @@ bch_config:
 tbcc_config:
   K: 63
   N: 126
-  V: 8
-  gen_poly_1: "561"
-  gen_poly_2: "753"
+  V: 7
+  gen_poly_1: "247"
+  gen_poly_2: "371"
