@@ -46,6 +46,13 @@ def setup_A_Wbit_D(code_config):
     poly1 = np.mod(np.convolve(p1, p_crc, mode="full"), 2)
     poly2 = np.mod(np.convolve(p2, p_crc, mode="full"), 2)
 
+    # zero-padding the shorter one
+    max_len = max(len(poly1), len(poly2))
+    if len(poly1) < max_len:
+        poly1 = np.pad(poly1, (0, max_len - len(poly1)), "constant")
+    if len(poly2) < max_len:
+        poly2 = np.pad(poly2, (0, max_len - len(poly2)), "constant")
+
     # states
     states_str = [np.binary_repr(s, width=num_concat_memory) for s in states]
     flipped_states = [s[::-1] for s in states_str]

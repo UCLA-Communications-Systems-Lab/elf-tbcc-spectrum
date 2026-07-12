@@ -111,10 +111,18 @@ def gen_all_elf_tbcc(
         )
     else:
         tbcc_base_polys = []
-        for freedom_bits in product([0, 1], repeat=nu - 1):
-            bin_str = "1" + "".join(map(str, freedom_bits)) + "1"
-            octal_val = oct(int(bin_str, 2))[2:]
-            tbcc_base_polys.append(octal_val)
+
+        # --- FIX: Loop through all possible degrees from 1 up to nu ---
+        # Degree 0 (the polynomial '1') can also be added if your system supports it.
+        # Here we assume a minimum degree of 1 so it has at least 2 terms (e.g., 1 + x).
+        for d in range(1, nu + 1):
+            for freedom_bits in product([0, 1], repeat=d - 1):
+                bin_str = "1" + "".join(map(str, freedom_bits)) + "1"
+                octal_val = oct(int(bin_str, 2))[2:]
+                tbcc_base_polys.append(octal_val)
+
+        # Deduplicate just in case different bit strings result in the same octal representation
+        tbcc_base_polys = sorted(list(set(tbcc_base_polys)))
 
         num_skipped = 0
         for p1, p2 in combinations(tbcc_base_polys, 2):
