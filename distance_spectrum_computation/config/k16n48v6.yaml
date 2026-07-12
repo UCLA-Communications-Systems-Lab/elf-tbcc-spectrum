@@ -1,0 +1,15 @@
+bch_config:
+  K: 16
+  N: 24
+  M: 8
+  polynomial: "110110011"
+
+
+tbcc_config:
+  K: 24
+  N: 48
+  V: 6
+  gen_poly_1: "133"
+  gen_poly_2: "171"
+
+target_EbNo_dB: 6.5
