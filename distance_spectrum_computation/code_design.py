@@ -178,10 +178,6 @@ def main(config_path: str, batch_idx: int, batch_size: int, cyclic_only: bool):
         else None
     )
 
-    # Handle generation scenarios cleanly based on YAML inputs:
-    # 1. Both provided -> runs single config
-    # 2. Only ELF poly provided -> runs single ELF poly across all TBCC combos
-    # 3. Only TBCC polys provided -> runs all ELF variations across single TBCC config
     elf_tbcc_configs = gen_all_elf_tbcc(
         K_elf=K_elf,
         N_elf=N_elf,
@@ -198,7 +194,23 @@ def main(config_path: str, batch_idx: int, batch_size: int, cyclic_only: bool):
         print("No configurations generated to process.")
         return
 
-    # --- Slicing logic for large configuration sets ---
+    # --- Construct Dynamic Output Filename Based on Constraints ---
+    if fixed_elf_poly is not None and fixed_tbcc_polys is not None:
+        # Both are explicitly fixed: name it uniquely down to the specific polynomials
+        p1, p2 = fixed_tbcc_polys
+        base_name = f"k{K_elf}n{N_tbcc}v{nu}_ELF_{fixed_elf_poly}_TBCC_{p1}_{p2}"
+    elif fixed_elf_poly is not None:
+        # Only ELF is fixed, TBCC is generating
+        base_name = f"k{K_elf}n{N_tbcc}v{nu}_ELF_{fixed_elf_poly}"
+    elif fixed_tbcc_polys is not None:
+        # Only TBCC is fixed, ELF is generating
+        p1, p2 = fixed_tbcc_polys
+        base_name = f"k{K_elf}n{N_tbcc}v{nu}_TBCC_{p1}_{p2}"
+    else:
+        # Fully combinatorial sweep
+        base_name = f"k{K_elf}n{N_tbcc}v{nu}_all_combos"
+
+    # --- Append batch index if slicing is active ---
     if total_configs > batch_size:
         start_idx = batch_idx * batch_size
         end_idx = min(start_idx + batch_size, total_configs)
@@ -214,12 +226,12 @@ def main(config_path: str, batch_idx: int, batch_size: int, cyclic_only: bool):
         )
         elf_tbcc_configs = elf_tbcc_configs[start_idx:end_idx]
 
-        base_filename = f"k{K_elf}n{N_tbcc}v{nu}_batch{batch_idx}"
+        base_filename = f"{base_name}_batch{batch_idx}"
     else:
         print(
             f"Total configs ({total_configs}) is within the threshold limit. Running all configs."
         )
-        base_filename = f"k{K_elf}n{N_tbcc}v{nu}"
+        base_filename = base_name
 
     file_path = Path(f"output/{base_filename}").with_suffix(".h5")
     with h5py.File(file_path, "w") as f:
