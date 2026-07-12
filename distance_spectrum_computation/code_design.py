@@ -71,16 +71,29 @@ def triple(elf_octal, p1, p2, m, nu):
     return min(triple, reversed_triple)
 
 
-def gen_all_elf_tbcc(K_elf, N_elf, m, N_tbcc, nu, cyclic_only=False):
+def gen_all_elf_tbcc(
+    K_elf,
+    N_elf,
+    m,
+    N_tbcc,
+    nu,
+    cyclic_only=False,
+    fixed_elf_poly=None,
+    fixed_tbcc_polys=None,
+):
     K_tbcc = N_elf
 
     # --- 1. ELF Options ---
     elf_options = []
-    if m > 0:
+    if fixed_elf_poly is not None:
+        # If an ELF polynomial is explicitly passed, use ONLY that one
+        elf_options.append(
+            {"K": K_elf, "N": N_elf, "M": m, "polynomial": fixed_elf_poly}
+        )
+    elif m > 0:
         for middle in product([0, 1], repeat=m - 1):
             poly_str = "1" + "".join(map(str, middle)) + "1"
 
-            # If the cyclic flag is set, only keep polynomials that divide x^N_elf - 1
             if cyclic_only and not divides_xN_minus_1(poly_str, N_elf):
                 continue
 
@@ -89,25 +102,32 @@ def gen_all_elf_tbcc(K_elf, N_elf, m, N_tbcc, nu, cyclic_only=False):
         elf_options.append({"K": K_elf, "N": N_elf, "M": m, "polynomial": "1"})
 
     # --- 2. TBCC Options ---
-    tbcc_base_polys = []
-    for freedom_bits in product([0, 1], repeat=nu - 1):
-        bin_str = "1" + "".join(map(str, freedom_bits)) + "1"
-        octal_val = oct(int(bin_str, 2))[2:]
-        tbcc_base_polys.append(octal_val)
-
     tbcc_options = []
-    num_skipped = 0
-    for p1, p2 in combinations(tbcc_base_polys, 2):
-        if gcd_gf2(int(p1, 8), int(p2, 8)) != 1:
-            num_skipped += 1
-            continue
-
+    if fixed_tbcc_polys is not None:
+        # If TBCC polynomials are explicitly passed, use ONLY those
+        p1, p2 = fixed_tbcc_polys
         tbcc_options.append(
             {"K": K_tbcc, "N": N_tbcc, "V": nu, "gen_poly_1": p1, "gen_poly_2": p2}
         )
-    print(f"Skipped {num_skipped} catastrophic combinations.")
+    else:
+        tbcc_base_polys = []
+        for freedom_bits in product([0, 1], repeat=nu - 1):
+            bin_str = "1" + "".join(map(str, freedom_bits)) + "1"
+            octal_val = oct(int(bin_str, 2))[2:]
+            tbcc_base_polys.append(octal_val)
 
-    # --- 3. Enumerate All Combinations ---
+        num_skipped = 0
+        for p1, p2 in combinations(tbcc_base_polys, 2):
+            if gcd_gf2(int(p1, 8), int(p2, 8)) != 1:
+                num_skipped += 1
+                continue
+
+            tbcc_options.append(
+                {"K": K_tbcc, "N": N_tbcc, "V": nu, "gen_poly_1": p1, "gen_poly_2": p2}
+            )
+        print(f"Skipped {num_skipped} catastrophic combinations.")
+
+    # --- 3. Enumerate Combinations ---
     symmetric_polys = set()
     skipped_polys = 0
     elf_tbcc_configs = []
@@ -139,11 +159,7 @@ def main(config_path: str, batch_idx: int, batch_size: int, cyclic_only: bool):
     with open(config_path, "r") as f:
         config = yaml.safe_load(f)
 
-    example_config = {
-        "bch_config": config["bch_config"],
-        "tbcc_config": config["tbcc_config"],
-    }
-    print(f"Example config: {example_config}")
+    print(f"Loaded config: {config}")
 
     K_elf = config["bch_config"]["K"]
     N_elf = config["bch_config"]["N"]
@@ -151,13 +167,36 @@ def main(config_path: str, batch_idx: int, batch_size: int, cyclic_only: bool):
     N_tbcc = config["tbcc_config"]["N"]
     nu = config["tbcc_config"]["V"]
 
-    # Pass the boolean flag down to the code generator matrix function
-    elf_tbcc_configs = gen_all_elf_tbcc(
-        K_elf, N_elf, m, N_tbcc, nu, cyclic_only=cyclic_only
+    # Check for specific predefined constraints in config
+    fixed_elf_poly = config["bch_config"].get("polynomial")
+    has_tbcc_polys = (
+        "gen_poly_1" in config["tbcc_config"] and "gen_poly_2" in config["tbcc_config"]
     )
-    elf_tbcc_configs.append(example_config)
+    fixed_tbcc_polys = (
+        (config["tbcc_config"]["gen_poly_1"], config["tbcc_config"]["gen_poly_2"])
+        if has_tbcc_polys
+        else None
+    )
+
+    # Handle generation scenarios cleanly based on YAML inputs:
+    # 1. Both provided -> runs single config
+    # 2. Only ELF poly provided -> runs single ELF poly across all TBCC combos
+    # 3. Only TBCC polys provided -> runs all ELF variations across single TBCC config
+    elf_tbcc_configs = gen_all_elf_tbcc(
+        K_elf=K_elf,
+        N_elf=N_elf,
+        m=m,
+        N_tbcc=N_tbcc,
+        nu=nu,
+        cyclic_only=cyclic_only,
+        fixed_elf_poly=fixed_elf_poly,
+        fixed_tbcc_polys=fixed_tbcc_polys,
+    )
 
     total_configs = len(elf_tbcc_configs)
+    if total_configs == 0:
+        print("No configurations generated to process.")
+        return
 
     # --- Slicing logic for large configuration sets ---
     if total_configs > batch_size:
@@ -180,7 +219,7 @@ def main(config_path: str, batch_idx: int, batch_size: int, cyclic_only: bool):
         print(
             f"Total configs ({total_configs}) is within the threshold limit. Running all configs."
         )
-        base_filename = f"k{K_elf}n{N_tbcc}v{nu}_all"
+        base_filename = f"k{K_elf}n{N_tbcc}v{nu}"
 
     file_path = Path(f"output/{base_filename}").with_suffix(".h5")
     with h5py.File(file_path, "w") as f:
