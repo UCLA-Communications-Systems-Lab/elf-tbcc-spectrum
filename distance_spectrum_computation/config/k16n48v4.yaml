@@ -7,6 +7,6 @@ bch_config:
 tbcc_config:
   K: 24
   N: 48
-  V: 3
+  V: 4
 
 target_EbNo_dB: 6.5
