@@ -1,0 +1,12 @@
+bch_config:
+  K: 16
+  N: 24
+  M: 8
+
+
+tbcc_config:
+  K: 24
+  N: 48
+  V: 3
+
+target_EbNo_dB: 6.5
