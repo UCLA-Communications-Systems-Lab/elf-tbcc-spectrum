@@ -20,7 +20,7 @@ Example: a rate-1/3 YAML uses `gen_polys: ["13", "15", "17"]`; the number of pol
 CUDA builds require `nvcc`; CGBN searches additionally need CGBN and GMP. On Colab, manually clone the intended branch before opening `gridsearch.ipynb`:
 
 ```bash
-git clone --branch dev-spectrum-codex https://github.com/UCLA-Communications-Systems-Lab/tbcc-decoder-test.git /content/tbcc-decoder-test
+git clone --branch dev-spectrum-codex https://github.com/UCLA-Communications-Systems-Lab/elf-tbcc-spectrum.git /content/tbcc-decoder-test
 cd /content/tbcc-decoder-test/distance_spectrum_computation/compile
 bash foldshift_compile.sh
 ```
