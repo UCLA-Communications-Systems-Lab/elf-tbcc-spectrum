@@ -4,10 +4,8 @@ from pathlib import Path
 import numpy as np
 import yaml
 from setup import setup_A_Wbit_D
-from step import trellisStep_shift
 from itertools import combinations, product
 from cyclic import divides_xN_minus_1
-import argparse
 
 def load_cuda_library():
     """Load the CUDA implementation when running a GPU design sweep."""
@@ -177,12 +175,35 @@ def gen_all_elf_tbcc(
     return elf_tbcc_configs
 
 
-def main(config_path: str, batch_idx: int, batch_size: int, cyclic_only: bool):
+def search_output_prefix(config_path, label="gridsearch"):
+    """Build a stable result prefix from a YAML file and optional run label."""
+    if not label:
+        label = "gridsearch"
+    return f"{Path(config_path).stem}_{label}"
+
+
+def search_output_path(output_dir, prefix, batch_index=None):
+    """Return the HDF5 path for a complete search or one search batch."""
+    suffix = f"_batch{batch_index}" if batch_index is not None else ""
+    return Path(output_dir) / f"{prefix}{suffix}.h5"
+
+
+def run_grid_search(
+    config_path,
+    output_dir="output",
+    batch_index=0,
+    batch_size=10000,
+    cyclic_only=False,
+    label="gridsearch",
+):
+    """Evaluate one GPU grid-search batch and store its distance spectra in HDF5."""
     import h5py
     from numba import cuda
     from dsu_bound_plots.bounds import dsu
 
-    with open(config_path, "r") as f:
+    config_path = Path(config_path)
+    output_dir = Path(output_dir)
+    with config_path.open("r") as f:
         config = yaml.safe_load(f)
 
     print(f"Loaded config: {config}")
@@ -214,44 +235,28 @@ def main(config_path: str, batch_idx: int, batch_size: int, cyclic_only: bool):
         print("No configurations generated to process.")
         return
 
-    # --- Construct Dynamic Output Filename Based on Constraints ---
-    if fixed_elf_poly is not None and fixed_tbcc_polys is not None:
-        # Both are explicitly fixed: name it uniquely down to the specific polynomials
-        base_name = f"k{K_elf}n{N_tbcc}v{nu}_ELF_{fixed_elf_poly}_TBCC_{'_'.join(fixed_tbcc_polys)}"
-    elif fixed_elf_poly is not None:
-        # Only ELF is fixed, TBCC is generating
-        base_name = f"k{K_elf}n{N_tbcc}v{nu}_ELF_{fixed_elf_poly}"
-    elif fixed_tbcc_polys is not None:
-        # Only TBCC is fixed, ELF is generating
-        base_name = f"k{K_elf}n{N_tbcc}v{nu}_TBCC_{'_'.join(fixed_tbcc_polys)}"
-    else:
-        # Fully combinatorial sweep
-        base_name = f"k{K_elf}n{N_tbcc}v{nu}_all_combos"
-
-    # --- Append batch index if slicing is active ---
+    prefix = search_output_prefix(config_path, label)
+    batch_output = None
     if total_configs > batch_size:
-        start_idx = batch_idx * batch_size
+        start_idx = batch_index * batch_size
         end_idx = min(start_idx + batch_size, total_configs)
 
         if start_idx >= total_configs:
             print(
-                f"Requested batch_idx {batch_idx} is out of bounds for total configs {total_configs}."
+                f"Requested batch index {batch_index} is out of bounds for {total_configs} configurations."
             )
             return
 
         print(
-            f"Total configs ({total_configs}) > limit ({batch_size}). Processing batch {batch_idx}: elements [{start_idx} to {end_idx-1}]"
+            f"Processing batch {batch_index}: configurations [{start_idx} to {end_idx - 1}] of {total_configs}."
         )
         elf_tbcc_configs = elf_tbcc_configs[start_idx:end_idx]
-
-        base_filename = f"{base_name}_batch{batch_idx}"
+        batch_output = batch_index
     else:
-        print(
-            f"Total configs ({total_configs}) is within the threshold limit. Running all configs."
-        )
-        base_filename = base_name
+        print(f"Running all {total_configs} configurations.")
 
-    file_path = Path(f"output/{base_filename}").with_suffix(".h5")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    file_path = search_output_path(output_dir, prefix, batch_output)
     with h5py.File(file_path, "w") as f:
         pass
     print(f"Writing results to {file_path}")
@@ -276,18 +281,6 @@ def main(config_path: str, batch_idx: int, batch_size: int, cyclic_only: bool):
         d_W = cuda.to_device(W_weight)
         d_D = cuda.to_device(D)
         d_spectrum = cuda.to_device(np.zeros(max_X, dtype=np.uint64))
-
-        USE_CPU = O_y <= 1024
-
-        if USE_CPU:
-            cpu_spectrum = np.zeros(max_X, dtype=np.uint64)
-            for i_stream, A in enumerate(As):
-                result = A.copy()
-                for stage in range(num_trellis_stages):
-                    result = trellisStep_shift(result, W_weight, D, max_shift_per_stage)
-                padded = np.zeros((result.shape[0], max_X), dtype=result.dtype)
-                padded[:, : result.shape[1]] = result
-                cpu_spectrum += padded[basis[i_stream], :]
 
         for i_stream, A in enumerate(As):
             O_y, O_x = A.shape
@@ -338,30 +331,7 @@ def main(config_path: str, batch_idx: int, batch_size: int, cyclic_only: bool):
                 best_dsu_pcw = dsub_pcw
                 best_code_config = code_config
 
-    print(f"Batch {batch_idx} Completed.")
+    print(f"Grid search completed: {file_path}")
     print(f"Best DSU P_cw in this batch: {best_dsu_pcw:4e}")
     print(f"Best code_config in this batch: {best_code_config}")
-
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("config", type=str, help="Path to YAML config file")
-    parser.add_argument(
-        "--batch_idx", type=int, default=0, help="Which 10k chunk to run (0, 1, 2...)"
-    )
-    parser.add_argument(
-        "--batch_size",
-        type=int,
-        default=10000,
-        help="Maximum size of configurations evaluated per script call",
-    )
-    # Added action="store_true" flag so that providing it maps to True, and omitting it defaults to False
-    parser.add_argument(
-        "--cyclic",
-        action="store_true",
-        help="Filter and only evaluate cyclic ELF configuration matrices",
-    )
-    args = parser.parse_args()
-
-    # Pass the argument flag to main
-    main(args.config, args.batch_idx, args.batch_size, args.cyclic)
+    return file_path
