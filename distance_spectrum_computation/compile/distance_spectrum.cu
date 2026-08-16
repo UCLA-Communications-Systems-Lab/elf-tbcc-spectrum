@@ -1,6 +1,8 @@
 #include <cuda_runtime.h>
 #include <stdint.h>
 
+#define MAX_BRANCH_WEIGHT 3
+
 template <typename T>
 __global__ void accumulate_to_spectrum(
     const T* buffer, int buffer_dim0, int buffer_dim1, 
@@ -23,7 +25,8 @@ __global__ void numba_sharedMem_trellisStep_foldshift(
     const T* __restrict__ A_in, int A_dim0, int A_dim1,
     const uint8_t* __restrict__ W_in, int W_dim0, int W_dim1,
     const uint32_t* __restrict__ D_in, int D_dim0, int D_dim1,
-    T* __restrict__ out, int out_dim0, int out_dim1, int curr_max_weight
+    T* __restrict__ out, int out_dim0, int out_dim1, int curr_max_weight,
+    int max_shift_per_stage
 ) {
     uint32_t num_states = A_dim0;
 
@@ -70,7 +73,7 @@ __global__ void numba_sharedMem_trellisStep_foldshift(
     uint32_t num_blk_iters = (curr_max_weight + bs_x - 1) / bs_x;
 
     __shared__ T shared_A[64][32];
-    __shared__ T shared_out[64][34];
+    __shared__ T shared_out[64][32 + MAX_BRANCH_WEIGHT];
 
     // implement per-thread carry register for overflow columns (minimize loads from global)
     T carry = 0;
@@ -91,7 +94,7 @@ __global__ void numba_sharedMem_trellisStep_foldshift(
         shared_out[ty][tx] = 0;
         shared_out[ty + bs_y][tx] = 0;
 
-        if (tx < 2) {
+        if (tx < max_shift_per_stage) {
             shared_out[ty][tx + bs_x] = 0;
             shared_out[ty + bs_y][tx + bs_x] = 0;
         }
@@ -99,7 +102,7 @@ __global__ void numba_sharedMem_trellisStep_foldshift(
         __syncthreads();
 
         // inject carry overflow
-        if (tx < 2) {
+        if (tx < max_shift_per_stage) {
             shared_out[2 * ty + z][tx] = carry;
         }
 
@@ -125,11 +128,11 @@ __global__ void numba_sharedMem_trellisStep_foldshift(
 
         __syncthreads();
 
-        if (tx < 2) {
+        if (tx < max_shift_per_stage) {
             carry = shared_out[2 * ty + z][tx + bs_x];
         }
 
-        if (x_id < curr_max_weight + 2) {
+        if (x_id < curr_max_weight + max_shift_per_stage) {
             out[(2 * y + z) * out_dim1 + x_id] = shared_out[2 * ty + z][tx];
         }
 
@@ -137,9 +140,9 @@ __global__ void numba_sharedMem_trellisStep_foldshift(
     }
 
     // flush carry 
-    if (tx < 2) {
+    if (tx < max_shift_per_stage) {
         int carry_x = num_blk_iters * bs_x + tx;
-        if (carry_x < curr_max_weight + 2 && carry != 0) {
+        if (carry_x < curr_max_weight + max_shift_per_stage && carry != 0) {
             out[(2 * y + z) * out_dim1 + carry_x] = carry;
         }
     }
@@ -154,6 +157,9 @@ extern "C" void launchFoldshiftPipeline (
     int num_trellis_stages, int max_shift_per_stage, int max_X,
     int basis_state, uint64_t* d_spectrum
 ) {
+    if (max_shift_per_stage < 2 || max_shift_per_stage > MAX_BRANCH_WEIGHT) {
+        return;
+    }
     int curr_max_weight = initial_max_weight;
 
     uint64_t* d_buffer_a;
@@ -183,7 +189,7 @@ extern "C" void launchFoldshiftPipeline (
             d_W,   W_dim0, W_dim1,
             d_D,   D_dim0, D_dim1,
             d_out, num_states, max_X,
-            curr_max_weight
+            curr_max_weight, max_shift_per_stage
         );
         curr_max_weight += max_shift_per_stage;
  

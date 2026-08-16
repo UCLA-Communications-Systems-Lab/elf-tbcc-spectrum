@@ -9,7 +9,6 @@ tbcc_config:
   K: 15
   N: 30
   V: 4
-  gen_poly_1: "23"
-  gen_poly_2: "25"
+  gen_polys: ["23", "25"]
 
 target_EbNo_dB: 6.5

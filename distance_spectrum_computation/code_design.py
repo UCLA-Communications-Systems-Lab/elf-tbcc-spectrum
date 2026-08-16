@@ -1,44 +1,34 @@
 from dataclasses import dataclass
 import os, ctypes
 from pathlib import Path
-import h5py
 import numpy as np
 import yaml
-from numba import cuda
 from setup import setup_A_Wbit_D
 from step import trellisStep_shift
-from itertools import product, combinations
-from dsu_bound_plots.bounds import dsu
+from itertools import combinations, product
 from cyclic import divides_xN_minus_1
 import argparse
 
-# import the shared library
-lib_path = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "lib", "libfoldshift.so")
-)
-if not os.path.exists(lib_path):
-    raise FileNotFoundError(
-        f"Shared library not found: {lib_path}. Run foldshift_compile.sh first."
+def load_cuda_library():
+    """Load the CUDA implementation when running a GPU design sweep."""
+    lib_path = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "lib", "libfoldshift.so")
     )
-
-cuda_lib = ctypes.CDLL(lib_path)
-
-# fmt: off
-cuda_lib.launchFoldshiftPipeline.argtypes = [
-    ctypes.c_int,                                # starting_state
-    ctypes.c_int, ctypes.c_int,                  # num_states, initial_max_weight
-    ctypes.c_void_p, ctypes.c_int, ctypes.c_int, # d_W, W_dim0, W_dim1
-    ctypes.c_void_p, ctypes.c_int, ctypes.c_int, # d_D, D_dim0, D_dim1
-    ctypes.c_int, ctypes.c_int, ctypes.c_int,    # stages, shift, max_X
-    ctypes.c_int, ctypes.c_void_p,               # basis_state, d_spectrum
-]
-cuda_lib.launchFoldshiftPipeline.restype = None
-# fmt: on
-
-# Output
-output_dir = Path.cwd() / "output"
-output_dir.mkdir(exist_ok=True)
-
+    if not os.path.exists(lib_path):
+        raise FileNotFoundError(
+            f"Shared library not found: {lib_path}. Run foldshift_compile.sh first."
+        )
+    cuda_lib = ctypes.CDLL(lib_path)
+    cuda_lib.launchFoldshiftPipeline.argtypes = [
+        ctypes.c_int,
+        ctypes.c_int, ctypes.c_int,
+        ctypes.c_void_p, ctypes.c_int, ctypes.c_int,
+        ctypes.c_void_p, ctypes.c_int, ctypes.c_int,
+        ctypes.c_int, ctypes.c_int, ctypes.c_int,
+        ctypes.c_int, ctypes.c_void_p,
+    ]
+    cuda_lib.launchFoldshiftPipeline.restype = None
+    return cuda_lib
 
 @dataclass
 class dist_spectra:
@@ -62,13 +52,32 @@ def reverse_polynomial(p_octal, num_bits):
     return oct(reversed_p)[2:]
 
 
-def triple(elf_octal, p1, p2, m, nu):
-    triple = (elf_octal, *sorted([p1, p2]))
-    reversed_triple = (
+def generator_key(elf_octal, generators, m, nu):
+    forward = (elf_octal, *sorted(generators))
+    reversed_key = (
         reverse_polynomial(elf_octal, m + 1),
-        *sorted([reverse_polynomial(p1, nu + 1), reverse_polynomial(p2, nu + 1)]),
+        *sorted(reverse_polynomial(poly, nu + 1) for poly in generators),
     )
-    return min(triple, reversed_triple)
+    return min(forward, reversed_key)
+
+
+def polynomial_candidates(nu):
+    """Return full-degree and lower-degree octal generator candidates."""
+    full_degree = set()
+    lower_degree = set()
+    for degree in range(1, nu + 1):
+        target = full_degree if degree == nu else lower_degree
+        for freedom_bits in product([0, 1], repeat=degree - 1):
+            bits = "1" + "".join(map(str, freedom_bits)) + "1"
+            target.add(oct(int(bits, 2))[2:])
+    return sorted(full_degree), sorted(lower_degree | full_degree)
+
+
+def generators_are_noncatastrophic(generators):
+    gcd = int(generators[0], 8)
+    for poly in generators[1:]:
+        gcd = gcd_gf2(gcd, int(poly, 8))
+    return gcd == 1
 
 
 def gen_all_elf_tbcc(
@@ -103,39 +112,40 @@ def gen_all_elf_tbcc(
 
     # --- 2. TBCC Options ---
     tbcc_options = []
+    if N_tbcc % K_tbcc:
+        raise ValueError("tbcc_config.N must be an integer multiple of tbcc_config.K")
+    rate_denominator = N_tbcc // K_tbcc
+    if rate_denominator not in (2, 3):
+        raise ValueError("Only rate-1/2 and rate-1/3 TBCC searches are supported")
+
     if fixed_tbcc_polys is not None:
-        # If TBCC polynomials are explicitly passed, use ONLY those
-        p1, p2 = fixed_tbcc_polys
+        if len(fixed_tbcc_polys) != rate_denominator:
+            raise ValueError("gen_polys length must match tbcc_config.N / tbcc_config.K")
         tbcc_options.append(
-            {"K": K_tbcc, "N": N_tbcc, "V": nu, "gen_poly_1": p1, "gen_poly_2": p2}
+            {"K": K_tbcc, "N": N_tbcc, "V": nu, "gen_polys": list(fixed_tbcc_polys)}
         )
     else:
-        # first poly always has nu-1 freedom bits
-        full_degree_polys = []
-        for freedom_bits in product([0, 1], repeat=nu - 1):
-            bin_str = "1" + "".join(map(str, freedom_bits)) + "1"
-            octal_val = oct(int(bin_str, 2))[2:]
-            full_degree_polys.append(octal_val)
-
-        less_degree_polys = []
-        for d in range(1, nu + 1):
-            for freedom_bits in product([0, 1], repeat=d - 1):
-                bin_str = "1" + "".join(map(str, freedom_bits)) + "1"
-                octal_val = oct(int(bin_str, 2))[2:]
-                less_degree_polys.append(octal_val)
-
-        # Deduplicate just in case different bit strings result in the same octal representation
-        full_degree_polys = sorted(list(set(full_degree_polys)))
-        less_degree_polys = sorted(list(set(less_degree_polys)))
-
+        full_degree_polys, all_polys = polynomial_candidates(nu)
+        full_degree_set = set(full_degree_polys)
         num_skipped = 0
-        for p1, p2 in product(full_degree_polys, less_degree_polys):
-            if gcd_gf2(int(p1, 8), int(p2, 8)) != 1:
+        if rate_denominator == 2:
+            candidates = (
+                (p1, p2)
+                for p1, p2 in product(full_degree_polys, all_polys)
+            )
+        else:
+            candidates = (
+                generators
+                for generators in combinations(all_polys, 3)
+                if any(poly in full_degree_set for poly in generators)
+            )
+
+        for generators in candidates:
+            if not generators_are_noncatastrophic(generators):
                 num_skipped += 1
                 continue
-
             tbcc_options.append(
-                {"K": K_tbcc, "N": N_tbcc, "V": nu, "gen_poly_1": p1, "gen_poly_2": p2}
+                {"K": K_tbcc, "N": N_tbcc, "V": nu, "gen_polys": list(generators)}
             )
         print(f"Skipped {num_skipped} catastrophic combinations.")
 
@@ -145,7 +155,7 @@ def gen_all_elf_tbcc(
     elf_tbcc_configs = []
     for b, t in product(elf_options, tbcc_options):
         elf_oct = oct(int(b["polynomial"], 2))[2:]
-        key = triple(elf_oct, t["gen_poly_1"], t["gen_poly_2"], m, nu)
+        key = generator_key(elf_oct, t["gen_polys"], m, nu)
         if key in symmetric_polys:
             skipped_polys += 1
             continue
@@ -153,7 +163,7 @@ def gen_all_elf_tbcc(
 
         filename = (
             f"elf_p{b['polynomial']}_"
-            f"tbcc_v{t['V']}_g{t['gen_poly_1']}_{t['gen_poly_2']}.npy"
+            f"tbcc_v{t['V']}_g{'_'.join(t['gen_polys'])}.npy"
         )
 
         elf_tbcc_configs.append(
@@ -168,10 +178,15 @@ def gen_all_elf_tbcc(
 
 
 def main(config_path: str, batch_idx: int, batch_size: int, cyclic_only: bool):
+    import h5py
+    from numba import cuda
+    from dsu_bound_plots.bounds import dsu
+
     with open(config_path, "r") as f:
         config = yaml.safe_load(f)
 
     print(f"Loaded config: {config}")
+    cuda_lib = load_cuda_library()
 
     K_elf = config["bch_config"]["K"]
     N_elf = config["bch_config"]["N"]
@@ -181,14 +196,7 @@ def main(config_path: str, batch_idx: int, batch_size: int, cyclic_only: bool):
 
     # Check for specific predefined constraints in config
     fixed_elf_poly = config["bch_config"].get("polynomial")
-    has_tbcc_polys = (
-        "gen_poly_1" in config["tbcc_config"] and "gen_poly_2" in config["tbcc_config"]
-    )
-    fixed_tbcc_polys = (
-        (config["tbcc_config"]["gen_poly_1"], config["tbcc_config"]["gen_poly_2"])
-        if has_tbcc_polys
-        else None
-    )
+    fixed_tbcc_polys = config["tbcc_config"].get("gen_polys")
 
     elf_tbcc_configs = gen_all_elf_tbcc(
         K_elf=K_elf,
@@ -209,15 +217,13 @@ def main(config_path: str, batch_idx: int, batch_size: int, cyclic_only: bool):
     # --- Construct Dynamic Output Filename Based on Constraints ---
     if fixed_elf_poly is not None and fixed_tbcc_polys is not None:
         # Both are explicitly fixed: name it uniquely down to the specific polynomials
-        p1, p2 = fixed_tbcc_polys
-        base_name = f"k{K_elf}n{N_tbcc}v{nu}_ELF_{fixed_elf_poly}_TBCC_{p1}_{p2}"
+        base_name = f"k{K_elf}n{N_tbcc}v{nu}_ELF_{fixed_elf_poly}_TBCC_{'_'.join(fixed_tbcc_polys)}"
     elif fixed_elf_poly is not None:
         # Only ELF is fixed, TBCC is generating
         base_name = f"k{K_elf}n{N_tbcc}v{nu}_ELF_{fixed_elf_poly}"
     elif fixed_tbcc_polys is not None:
         # Only TBCC is fixed, ELF is generating
-        p1, p2 = fixed_tbcc_polys
-        base_name = f"k{K_elf}n{N_tbcc}v{nu}_TBCC_{p1}_{p2}"
+        base_name = f"k{K_elf}n{N_tbcc}v{nu}_TBCC_{'_'.join(fixed_tbcc_polys)}"
     else:
         # Fully combinatorial sweep
         base_name = f"k{K_elf}n{N_tbcc}v{nu}_all_combos"
@@ -261,10 +267,10 @@ def main(config_path: str, batch_idx: int, batch_size: int, cyclic_only: bool):
         if i % 1000 == 0:
             print(f"Local Batch Processed: {i}/{len(elf_tbcc_configs)}")
 
-        As, W_weight, D, basis, num_trellis_stages = setup_A_Wbit_D(code_config)
+        As, W_weight, D, basis, num_trellis_stages, num_output_bits = setup_A_Wbit_D(code_config)
         A_shape = As[0].shape
         O_y, O_x = A_shape
-        max_shift_per_stage = 2
+        max_shift_per_stage = num_output_bits
         max_X = O_x + max_shift_per_stage * num_trellis_stages
 
         d_W = cuda.to_device(W_weight)
@@ -279,7 +285,7 @@ def main(config_path: str, batch_idx: int, batch_size: int, cyclic_only: bool):
                 result = A.copy()
                 for stage in range(num_trellis_stages):
                     result = trellisStep_shift(result, W_weight, D, max_shift_per_stage)
-                padded = np.zeros((result.shape[0], max_X), dtype=np.uint64)
+                padded = np.zeros((result.shape[0], max_X), dtype=result.dtype)
                 padded[:, : result.shape[1]] = result
                 cpu_spectrum += padded[basis[i_stream], :]
 
@@ -314,8 +320,7 @@ def main(config_path: str, batch_idx: int, batch_size: int, cyclic_only: bool):
             dsub_pcw = dsu(spectra, target_esno_linear)
             config_str = (
                 f"BCH_poly{code_config['bch_config']['polynomial']}_"
-                f"TBCC_{code_config['tbcc_config']['gen_poly_1']}_"
-                f"{code_config['tbcc_config']['gen_poly_2']}"
+                f"TBCC_{'_'.join(code_config['tbcc_config']['gen_polys'])}"
             )
 
             with h5py.File(file_path, "a") as f:

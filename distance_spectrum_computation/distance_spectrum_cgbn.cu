@@ -8,6 +8,7 @@
 #define TPI 4
 #define BITS 128
 #define INSTANCES_PER_WARP (32 / TPI)
+#define MAX_BRANCH_WEIGHT 3
 
 typedef cgbn_context_t<TPI> context_t;
 typedef cgbn_env_t<context_t, BITS> env_t;
@@ -58,7 +59,8 @@ __global__ void cgbn_sharedMem_trellisStep_foldshift(
     bn_mem_t* __restrict__ A_in, int A_dim0, int A_dim1,
     const uint8_t* __restrict__ W_in, int W_dim0, int W_dim1,
     const uint32_t* __restrict__ D_in, int D_dim0, int D_dim1,
-    bn_mem_t* __restrict__ out, int out_dim0, int out_dim1, int curr_max_weight
+    bn_mem_t* __restrict__ out, int out_dim0, int out_dim1, int curr_max_weight,
+    int max_shift_per_stage
 ) {
     context_t bn_context;
     env_t bn_env(bn_context);
@@ -113,7 +115,7 @@ __global__ void cgbn_sharedMem_trellisStep_foldshift(
     uint32_t num_blk_iters = (curr_max_weight + block_instances - 1) / block_instances;
     
     __shared__ bn_mem_t shared_A[64][INSTANCES_PER_WARP];
-    __shared__ bn_mem_t shared_out[64][INSTANCES_PER_WARP + 2];
+    __shared__ bn_mem_t shared_out[64][INSTANCES_PER_WARP + MAX_BRANCH_WEIGHT];
 
     // implement per-thread carry register for overflow columns (minimize loads from global)
     bn_t carry;
@@ -147,7 +149,7 @@ __global__ void cgbn_sharedMem_trellisStep_foldshift(
         cgbn_store(bn_env, &shared_out[ty][instance_x], zero);
         cgbn_store(bn_env, &shared_out[ty + bs_y][instance_x], zero);
 
-        if (instance_x < 2) {
+        if (instance_x < max_shift_per_stage) {
             cgbn_store(bn_env, &shared_out[ty][instance_x + block_instances], zero);
             cgbn_store(bn_env, &shared_out[ty + bs_y][instance_x + block_instances], zero);
         }
@@ -155,7 +157,7 @@ __global__ void cgbn_sharedMem_trellisStep_foldshift(
         __syncthreads();
 
         // inject carry overflow
-        if (instance_x < 2) {
+        if (instance_x < max_shift_per_stage) {
             cgbn_store(bn_env, &shared_out[2 * ty + z][instance_x], carry);
         }
 
@@ -194,12 +196,12 @@ __global__ void cgbn_sharedMem_trellisStep_foldshift(
 
         __syncthreads();
 
-        if (instance_x < 2) {
+        if (instance_x < max_shift_per_stage) {
             // carry = shared_out[2 * ty + z][tx + bs_x];
             cgbn_load(bn_env, carry, &shared_out[2 * ty + z][instance_x + block_instances]);
         }
 
-        if (x_id < curr_max_weight + 2) {
+        if (x_id < curr_max_weight + max_shift_per_stage) {
             // out[(2 * y + z) * out_dim1 + x_id] = shared_out[2 * ty + z][tx];
             bn_t result;
             cgbn_load(bn_env, result, &shared_out[2 * ty + z][instance_x]);
@@ -210,9 +212,9 @@ __global__ void cgbn_sharedMem_trellisStep_foldshift(
     }
 
     // flush carry 
-    if (instance_x < 2) {
+    if (instance_x < max_shift_per_stage) {
         int carry_x = num_blk_iters * block_instances + instance_x;
-        if (carry_x < curr_max_weight + 2 && cgbn_compare_ui32(bn_env, carry, 0) != 0) {
+        if (carry_x < curr_max_weight + max_shift_per_stage && cgbn_compare_ui32(bn_env, carry, 0) != 0) {
             // out[(2 * y + z) * out_dim1 + carry_x] = carry;
             cgbn_store(bn_env, &out[(2 * y + z) * out_dim1 + carry_x], carry);
         }
@@ -228,6 +230,9 @@ extern "C" void launchCGBNPipeline (
     int num_trellis_stages, int max_shift_per_stage, int max_X,
     int basis_state, bn_mem_t* d_spectrum
 ) {
+    if (max_shift_per_stage < 2 || max_shift_per_stage > MAX_BRANCH_WEIGHT) {
+        return;
+    }
     int curr_max_weight = initial_max_weight;
 
     bn_mem_t* d_bn_buffer_a;
@@ -275,7 +280,7 @@ extern "C" void launchCGBNPipeline (
             d_W, W_dim0, W_dim1,
             d_D, D_dim0, D_dim1,
             d_bn_out, num_states, max_X,
-            curr_max_weight
+            curr_max_weight, max_shift_per_stage
         );
 
         err = cudaGetLastError();

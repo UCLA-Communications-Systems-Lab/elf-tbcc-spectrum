@@ -2,14 +2,11 @@ bch_config:
   K: 11
   N: 15
   M: 4
-  polynomial: "10011"
 
 
 tbcc_config:
   K: 15
   N: 30
   V: 4
-  gen_poly_1: "27"
-  gen_poly_2: "31"
 
 target_EbNo_dB: 6.5

@@ -9,5 +9,4 @@ tbcc_config:
   K: 63
   N: 126
   V: 8
-  gen_poly_1: "561"
-  gen_poly_2: "753"
+  gen_polys: ["561", "753"]

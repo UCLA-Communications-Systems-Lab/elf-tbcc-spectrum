@@ -45,13 +45,13 @@ CGBN_Limbs = cuda_lib.getCGBNLimbs()
 def main(path):
     with open(path, "r") as f:
         code_config = yaml.safe_load(f)
-    base_filename = f"k{code_config["bch_config"]["K"]}n{code_config["tbcc_config"]["N"]}v{code_config["tbcc_config"]["V"]}"
+    base_filename = f"k{code_config['bch_config']['K']}n{code_config['tbcc_config']['N']}v{code_config['tbcc_config']['V']}"
     spectra_filename = f"{base_filename}_dist_spectrum.npy"
 
-    As, W_weight, D, basis, num_trellis_stages = setup_A_Wbit_D(code_config)
+    As, W_weight, D, basis, num_trellis_stages, num_output_bits = setup_A_Wbit_D(code_config)
     A_shape = As[0].shape
     O_y, O_x = A_shape # O_y is 2^(m + nu) = 2^(num_states)
-    max_shift_per_stage = 2
+    max_shift_per_stage = num_output_bits
     max_X = O_x + max_shift_per_stage * num_trellis_stages
 
     d_W = cuda.to_device(W_weight)
@@ -69,7 +69,7 @@ def main(path):
             for stage in range(num_trellis_stages):
                 result = trellisStep_shift(result, W_weight, D, max_shift_per_stage)
             # result is [num_states, final_width]; pad to max_X
-            padded = np.zeros((result.shape[0], max_X), dtype=np.uint64)
+            padded = np.zeros((result.shape[0], max_X), dtype=result.dtype)
             padded[:, :result.shape[1]] = result
             cpu_spectrum += padded[basis[i_stream], :]
 

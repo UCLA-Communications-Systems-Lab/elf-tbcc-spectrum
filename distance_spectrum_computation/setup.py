@@ -1,5 +1,4 @@
 import numpy as np
-import scipy.linalg as la
 import yaml
 import argparse
 import sys
@@ -25,33 +24,48 @@ def bin2dec(binary):
     ]
 
 
+def validate_code_config(code_config):
+    """Validate the binary rate-1/n TBCC configuration used by this pipeline."""
+    try:
+        bch = code_config["bch_config"]
+        tbcc = code_config["tbcc_config"]
+        gen_polys = tbcc["gen_polys"]
+    except KeyError as exc:
+        raise ValueError(f"Missing required configuration field: {exc.args[0]}") from exc
+
+    if not isinstance(gen_polys, list) or len(gen_polys) not in (2, 3):
+        raise ValueError("tbcc_config.gen_polys must contain exactly two or three octal polynomials")
+    if not all(isinstance(poly, str) and poly and set(poly) <= set("01234567") for poly in gen_polys):
+        raise ValueError("tbcc_config.gen_polys must be non-empty octal strings")
+    if tbcc["K"] != bch["N"]:
+        raise ValueError("tbcc_config.K must equal bch_config.N")
+    if tbcc["N"] != len(gen_polys) * tbcc["K"]:
+        raise ValueError("tbcc_config.N must equal len(gen_polys) * tbcc_config.K")
+
+    return len(gen_polys)
+
+
 def setup_A_Wbit_D(code_config):
 
+    num_output_bits = validate_code_config(code_config)
     nu = code_config["tbcc_config"]["V"]
     m = code_config["bch_config"]["M"]
-    K = code_config["bch_config"]["K"]
-    crc = code_config["bch_config"]["polynomial"]
     num_concat_memory = nu + m
     num_total_states = 2 ** (num_concat_memory)
-    num_valid_starting_states = 2 ** (code_config["tbcc_config"]["V"])
     states = np.arange(0, num_total_states, dtype=np.int32)
     num_trellis_stages = code_config["bch_config"]["K"] + code_config["bch_config"]["M"]
-    cwd_max_weight = 2 * num_trellis_stages
-
-    p1 = np.flip(octal_to_binary_list(code_config["tbcc_config"]["gen_poly_1"]))
-    p2 = np.flip(octal_to_binary_list(code_config["tbcc_config"]["gen_poly_2"]))
+    generator_polys = [
+        np.flip(octal_to_binary_list(poly))
+        for poly in code_config["tbcc_config"]["gen_polys"]
+    ]
     p_crc = np.flip([int(bit) for bit in code_config["bch_config"]["polynomial"]])
 
-    # convolution between gen_poly with crc
-    poly1 = np.mod(np.convolve(p1, p_crc, mode="full"), 2)
-    poly2 = np.mod(np.convolve(p2, p_crc, mode="full"), 2)
-
-    # zero-padding the shorter one
-    max_len = max(len(poly1), len(poly2))
-    if len(poly1) < max_len:
-        poly1 = np.pad(poly1, (0, max_len - len(poly1)), "constant")
-    if len(poly2) < max_len:
-        poly2 = np.pad(poly2, (0, max_len - len(poly2)), "constant")
+    # Convolve each TBCC generator with the ELF polynomial, then pad to a
+    # common length before evaluating all output bits in one matrix product.
+    combined_polys = [np.mod(np.convolve(poly, p_crc, mode="full"), 2) for poly in generator_polys]
+    max_len = max(map(len, combined_polys))
+    combined_polys = [np.pad(poly, (0, max_len - len(poly)), "constant") for poly in combined_polys]
+    generator_matrix = np.vstack(combined_polys)
 
     # states
     states_str = [np.binary_repr(s, width=num_concat_memory) for s in states]
@@ -67,25 +81,11 @@ def setup_A_Wbit_D(code_config):
     dst_1 = np.array(bin2dec(input_1[:, :num_concat_memory]))
 
     # output
-    out0 = np.mod(np.matmul(input_0, np.transpose(np.vstack((poly1, poly2)))), 2)
-    out1 = np.mod(np.matmul(input_1, np.transpose(np.vstack((poly1, poly2)))), 2)
+    out0 = np.mod(np.matmul(input_0, generator_matrix.T), 2)
+    out1 = np.mod(np.matmul(input_1, generator_matrix.T), 2)
     Wout0 = np.sum(out0, axis=1, dtype=np.uint8)
     Wout1 = np.sum(out1, axis=1, dtype=np.uint8)
-    zidx0 = (Wout0 == 0).reshape(-1, 1)
-    zidx1 = (Wout1 == 0).reshape(-1, 1)
     W_weight = np.stack((Wout0, Wout1), axis=0).T.copy().astype(np.uint8)
-
-    ## proto distance spectrum
-    # [::-1] for the binary representation is for
-    # weight 0 -> [1 0 0]; weight 1 -> [0 1 0]; weight 2 -> [0 0 1]
-    Wout0_str = [np.binary_repr(weight, width=2)[::-1] for weight in Wout0]
-    Wout1_str = [np.binary_repr(weight, width=2)[::-1] for weight in Wout1]
-    Wcoef0 = np.concatenate(
-        (zidx0, np.array([[int(bit) for bit in s] for s in Wout0_str])), axis=1
-    )
-    Wcoef1 = np.concatenate(
-        (zidx1, np.array([[int(bit) for bit in s] for s in Wout1_str])), axis=1
-    )
 
     # set up A
     # A_in: [num_states] x [max weight up to this meta-stage]
@@ -100,7 +100,7 @@ def setup_A_Wbit_D(code_config):
     # D_in: [num_states] x [input]
     D = np.stack((dst_0, dst_1), axis=1).astype(np.uint32)
 
-    return As, W_weight, D, basis, num_trellis_stages
+    return As, W_weight, D, basis, num_trellis_stages, num_output_bits
 
 
 def computeMetaStage(W, D, dtype=np.uint64):

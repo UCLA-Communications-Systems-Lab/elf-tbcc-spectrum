@@ -16,7 +16,7 @@ def trellisStep_conv(A, W, D):
     O_z = W_z
     O_y = W_y
     O_x = A_x + W_x - 1
-    O = np.zeros(shape=(O_z, O_y, O_x), dtype=np.uint64)
+    O = np.zeros(shape=(O_z, O_y, O_x), dtype=A.dtype)
     for c in range(O_z):
         # input
         for y in range(O_y):
@@ -47,7 +47,7 @@ def trellisStep_shift(ds, W, D, max_shift):
     num_states = old_ds_shape[0]
     curr_max_weight = old_ds_shape[1]
     new_max_weight = curr_max_weight + max_shift
-    newds = np.zeros(shape=(num_states, new_max_weight))
+    newds = np.zeros(shape=(num_states, new_max_weight), dtype=ds.dtype)
 
     num_inputs = W.shape[1]
 
@@ -56,7 +56,7 @@ def trellisStep_shift(ds, W, D, max_shift):
         for i_input in range(num_inputs):
             shift_amt = W[i_begin_state, i_input]
             dst_state = D[i_begin_state, i_input]
-            shifted_ds = np.zeros(shape=(new_max_weight,))
+            shifted_ds = np.zeros(shape=(new_max_weight,), dtype=ds.dtype)
             shifted_ds[shift_amt : shift_amt + curr_max_weight] = ds[i_begin_state, :]
             newds[dst_state, :] += shifted_ds
 
@@ -86,7 +86,7 @@ def trellisStep_folded_shift(A, W, D, max_shift):
     num_states = old_ds_shape[0]
     curr_max_weight = old_ds_shape[1]
     new_max_weight = curr_max_weight + max_shift
-    newA = np.zeros(shape=(num_states, new_max_weight))
+    newA = np.zeros(shape=(num_states, new_max_weight), dtype=A.dtype)
 
     num_inputs = W.shape[1]
 
@@ -97,14 +97,14 @@ def trellisStep_folded_shift(A, W, D, max_shift):
         # first incoming state to this end state
         begin_state_0 = i_end_state // 2
         shift_amt_0 = W[begin_state_0, input]
-        shifted_ds = np.zeros(shape=(new_max_weight,))
+        shifted_ds = np.zeros(shape=(new_max_weight,), dtype=A.dtype)
         shifted_ds[shift_amt_0 : shift_amt_0 + curr_max_weight] = A[begin_state_0, :]
         newA[i_end_state, :] += shifted_ds
 
         # second incoming state to this end state
         begin_state_1 = begin_state_0 + mid_state
         shift_amt_1 = W[begin_state_1, input]
-        shifted_ds = np.zeros(shape=(new_max_weight,))
+        shifted_ds = np.zeros(shape=(new_max_weight,), dtype=A.dtype)
         shifted_ds[shift_amt_1 : shift_amt_1 + curr_max_weight] = A[begin_state_1, :]
         newA[i_end_state, :] += shifted_ds
 
