@@ -7,6 +7,7 @@ from setup import setup_A_Wbit_D
 from itertools import combinations, product
 from cyclic import divides_xN_minus_1
 
+
 def load_cuda_library():
     """Load the CUDA implementation when running a GPU design sweep."""
     lib_path = os.path.abspath(
@@ -19,14 +20,23 @@ def load_cuda_library():
     cuda_lib = ctypes.CDLL(lib_path)
     cuda_lib.launchFoldshiftPipeline.argtypes = [
         ctypes.c_int,
-        ctypes.c_int, ctypes.c_int,
-        ctypes.c_void_p, ctypes.c_int, ctypes.c_int,
-        ctypes.c_void_p, ctypes.c_int, ctypes.c_int,
-        ctypes.c_int, ctypes.c_int, ctypes.c_int,
-        ctypes.c_int, ctypes.c_void_p,
+        ctypes.c_int,
+        ctypes.c_int,
+        ctypes.c_void_p,
+        ctypes.c_int,
+        ctypes.c_int,
+        ctypes.c_void_p,
+        ctypes.c_int,
+        ctypes.c_int,
+        ctypes.c_int,
+        ctypes.c_int,
+        ctypes.c_int,
+        ctypes.c_int,
+        ctypes.c_void_p,
     ]
     cuda_lib.launchFoldshiftPipeline.restype = None
     return cuda_lib
+
 
 @dataclass
 class dist_spectra:
@@ -118,7 +128,9 @@ def gen_all_elf_tbcc(
 
     if fixed_tbcc_polys is not None:
         if len(fixed_tbcc_polys) != rate_denominator:
-            raise ValueError("gen_polys length must match tbcc_config.N / tbcc_config.K")
+            raise ValueError(
+                "gen_polys length must match tbcc_config.N / tbcc_config.K"
+            )
         tbcc_options.append(
             {"K": K_tbcc, "N": N_tbcc, "V": nu, "gen_polys": list(fixed_tbcc_polys)}
         )
@@ -127,10 +139,7 @@ def gen_all_elf_tbcc(
         full_degree_set = set(full_degree_polys)
         num_skipped = 0
         if rate_denominator == 2:
-            candidates = (
-                (p1, p2)
-                for p1, p2 in product(full_degree_polys, all_polys)
-            )
+            candidates = ((p1, p2) for p1, p2 in product(full_degree_polys, all_polys))
         else:
             candidates = (
                 generators
@@ -160,8 +169,7 @@ def gen_all_elf_tbcc(
         symmetric_polys.add(key)
 
         filename = (
-            f"elf_p{b['polynomial']}_"
-            f"tbcc_v{t['V']}_g{'_'.join(t['gen_polys'])}.npy"
+            f"elf_p{b['polynomial']}_" f"tbcc_v{t['V']}_g{'_'.join(t['gen_polys'])}.npy"
         )
 
         elf_tbcc_configs.append(
@@ -268,55 +276,57 @@ def run_grid_search(
     best_dsu_pcw = 1
     best_code_config = elf_tbcc_configs[0]
 
-    for i, code_config in enumerate(elf_tbcc_configs):
-        if i % 1000 == 0:
-            print(f"Local Batch Processed: {i}/{len(elf_tbcc_configs)}")
+    with h5py.File(file_path, "a") as f:
+        for i, code_config in enumerate(elf_tbcc_configs):
+            if i % 100 == 0:
+                print(f"Local Batch Processed: {i}/{len(elf_tbcc_configs)}", flush=True)
 
-        As, W_weight, D, basis, num_trellis_stages, num_output_bits = setup_A_Wbit_D(code_config)
-        A_shape = As[0].shape
-        O_y, O_x = A_shape
-        max_shift_per_stage = num_output_bits
-        max_X = O_x + max_shift_per_stage * num_trellis_stages
-
-        d_W = cuda.to_device(W_weight)
-        d_D = cuda.to_device(D)
-        d_spectrum = cuda.to_device(np.zeros(max_X, dtype=np.uint64))
-
-        for i_stream, A in enumerate(As):
-            O_y, O_x = A.shape
-            starting_state = int(np.nonzero(A)[0][0])
-
-            cuda_lib.launchFoldshiftPipeline(
-                starting_state,
-                O_y,
-                O_x,
-                d_W.device_ctypes_pointer.value,
-                W_weight.shape[0],
-                W_weight.shape[1],
-                d_D.device_ctypes_pointer.value,
-                D.shape[0],
-                D.shape[1],
-                num_trellis_stages,
-                max_shift_per_stage,
-                max_X,
-                int(basis[i_stream]),
-                d_spectrum.device_ctypes_pointer.value,
+            As, W_weight, D, basis, num_trellis_stages, num_output_bits = (
+                setup_A_Wbit_D(code_config)
             )
+            A_shape = As[0].shape
+            O_y, O_x = A_shape
+            max_shift_per_stage = num_output_bits
+            max_X = O_x + max_shift_per_stage * num_trellis_stages
 
-        cuda.synchronize()
-        gpu_spectrum = d_spectrum.copy_to_host()
+            d_W = cuda.to_device(W_weight)
+            d_D = cuda.to_device(D)
+            d_spectrum = cuda.to_device(np.zeros(max_X, dtype=np.uint64))
 
-        if gpu_spectrum[0] == 1:
-            spectra = dist_spectra(
-                num_cwds=gpu_spectrum, hamming_dist=np.arange(len(gpu_spectrum))
-            )
-            dsub_pcw = dsu(spectra, target_esno_linear)
-            config_str = (
-                f"BCH_poly{code_config['bch_config']['polynomial']}_"
-                f"TBCC_{'_'.join(code_config['tbcc_config']['gen_polys'])}"
-            )
+            for i_stream, A in enumerate(As):
+                O_y, O_x = A.shape
+                starting_state = int(np.nonzero(A)[0][0])
 
-            with h5py.File(file_path, "a") as f:
+                cuda_lib.launchFoldshiftPipeline(
+                    starting_state,
+                    O_y,
+                    O_x,
+                    d_W.device_ctypes_pointer.value,
+                    W_weight.shape[0],
+                    W_weight.shape[1],
+                    d_D.device_ctypes_pointer.value,
+                    D.shape[0],
+                    D.shape[1],
+                    num_trellis_stages,
+                    max_shift_per_stage,
+                    max_X,
+                    int(basis[i_stream]),
+                    d_spectrum.device_ctypes_pointer.value,
+                )
+
+            cuda.synchronize()
+            gpu_spectrum = d_spectrum.copy_to_host()
+
+            if gpu_spectrum[0] == 1:
+                spectra = dist_spectra(
+                    num_cwds=gpu_spectrum, hamming_dist=np.arange(len(gpu_spectrum))
+                )
+                dsub_pcw = dsu(spectra, target_esno_linear)
+                config_str = (
+                    f"BCH_poly{code_config['bch_config']['polynomial']}_"
+                    f"TBCC_{'_'.join(code_config['tbcc_config']['gen_polys'])}"
+                )
+
                 grp = f.require_group(config_str)
                 if "dsub_pcw" in grp:
                     del grp["dsub_pcw"]
@@ -327,11 +337,39 @@ def run_grid_search(
                     "gpu_spectrum", data=gpu_spectrum, compression="gzip"
                 )
 
-            if dsub_pcw < best_dsu_pcw:
-                best_dsu_pcw = dsub_pcw
-                best_code_config = code_config
+                if dsub_pcw < best_dsu_pcw:
+                    best_dsu_pcw = dsub_pcw
+                    best_code_config = code_config
 
     print(f"Grid search completed: {file_path}")
     print(f"Best DSU P_cw in this batch: {best_dsu_pcw:4e}")
     print(f"Best code_config in this batch: {best_code_config}")
     return file_path
+
+
+if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Run ELF-TBCC grid search")
+    parser.add_argument("config", help="Path to YAML config file")
+    parser.add_argument(
+        "--output-dir", default="output", help="Directory for HDF5 output"
+    )
+    parser.add_argument("--batch-index", type=int, default=0, help="Batch index")
+    parser.add_argument("--batch-size", type=int, default=10000, help="Batch size")
+    parser.add_argument(
+        "--cyclic-only", action="store_true", help="Only search cyclic polynomials"
+    )
+    parser.add_argument(
+        "--label", default="gridsearch", help="Label for output file prefix"
+    )
+    args = parser.parse_args()
+
+    run_grid_search(
+        config_path=args.config,
+        output_dir=args.output_dir,
+        batch_index=args.batch_index,
+        batch_size=args.batch_size,
+        cyclic_only=args.cyclic_only,
+        label=args.label,
+    )

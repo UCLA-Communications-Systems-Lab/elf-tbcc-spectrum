@@ -1,0 +1,12 @@
+bch_config:
+  K: 51
+  N: 63
+  M: 12
+
+tbcc_config:
+  K: 63
+  N: 126
+  V: 4
+  gen_polys: ["27", "31"]
+
+target_EbNo_dB: 3.5

@@ -31,11 +31,18 @@ def validate_code_config(code_config):
         tbcc = code_config["tbcc_config"]
         gen_polys = tbcc["gen_polys"]
     except KeyError as exc:
-        raise ValueError(f"Missing required configuration field: {exc.args[0]}") from exc
+        raise ValueError(
+            f"Missing required configuration field: {exc.args[0]}"
+        ) from exc
 
     if not isinstance(gen_polys, list) or len(gen_polys) not in (2, 3):
-        raise ValueError("tbcc_config.gen_polys must contain exactly two or three octal polynomials")
-    if not all(isinstance(poly, str) and poly and set(poly) <= set("01234567") for poly in gen_polys):
+        raise ValueError(
+            "tbcc_config.gen_polys must contain exactly two or three octal polynomials"
+        )
+    if not all(
+        isinstance(poly, str) and poly and set(poly) <= set("01234567")
+        for poly in gen_polys
+    ):
         raise ValueError("tbcc_config.gen_polys must be non-empty octal strings")
     if tbcc["K"] != bch["N"]:
         raise ValueError("tbcc_config.K must equal bch_config.N")
@@ -62,23 +69,24 @@ def setup_A_Wbit_D(code_config):
 
     # Convolve each TBCC generator with the ELF polynomial, then pad to a
     # common length before evaluating all output bits in one matrix product.
-    combined_polys = [np.mod(np.convolve(poly, p_crc, mode="full"), 2) for poly in generator_polys]
+    combined_polys = [
+        np.mod(np.convolve(poly, p_crc, mode="full"), 2) for poly in generator_polys
+    ]
     max_len = max(map(len, combined_polys))
-    combined_polys = [np.pad(poly, (0, max_len - len(poly)), "constant") for poly in combined_polys]
+    combined_polys = [
+        np.pad(poly, (0, max_len - len(poly)), "constant") for poly in combined_polys
+    ]
     generator_matrix = np.vstack(combined_polys)
 
     # states
-    states_str = [np.binary_repr(s, width=num_concat_memory) for s in states]
-    flipped_states = [s[::-1] for s in states_str]
-    states_matrix = np.array([[int(bit) for bit in s] for s in flipped_states])
-
-    # input, dst states
-    v_zeros = np.zeros(shape=(num_total_states, 1))
-    v_ones = np.ones(shape=(num_total_states, 1))
-    input_0 = np.hstack((v_zeros, states_matrix))
-    input_1 = np.hstack((v_ones, states_matrix))
-    dst_0 = np.array(bin2dec(input_0[:, :num_concat_memory]))
-    dst_1 = np.array(bin2dec(input_1[:, :num_concat_memory]))
+    # states_matrix[s, i] is bit i of state s (LSB at index 0)
+    bits = (states[:, None] >> np.arange(num_concat_memory, dtype=np.uint32)) & 1
+    v_zeros = np.zeros(shape=(num_total_states, 1), dtype=bits.dtype)
+    v_ones = np.ones(shape=(num_total_states, 1), dtype=bits.dtype)
+    input_0 = np.hstack((v_zeros, bits))
+    input_1 = np.hstack((v_ones, bits))
+    dst_0 = ((states << 1) & (num_total_states - 1)).astype(np.uint32)
+    dst_1 = (dst_0 | 1).astype(np.uint32)
 
     # output
     out0 = np.mod(np.matmul(input_0, generator_matrix.T), 2)
