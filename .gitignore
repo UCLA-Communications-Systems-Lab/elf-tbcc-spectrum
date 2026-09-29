@@ -14,6 +14,8 @@ test.ipynb
 # Large data files
 data/
 *.h5
+/distance_spectrum_computation/dsu_bound_plots/figures/
+/distance_spectrum_computation/output/
 
 # OS / editor artefacts
 .DS_Store

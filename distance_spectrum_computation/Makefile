@@ -29,7 +29,7 @@ ifndef CONFIG
 endif
 
 compile: check_config | $(LIB_DIR)
-	@if [ $(K_VAL) -gt 64 ]; then \
+	@if [ $(K_VAL) -ge 64 ]; then \
 		$(MAKE) compile-cgbn; \
 	else \
 		$(MAKE) compile-kernel; \
@@ -42,11 +42,11 @@ compile-cgbn:
 	$(CXX) $(CXXFLAGS) $(GENCODE) -I$(CGBN_INCLUDE) $(GMP_LIB) $(SRC_CGBN) -o $(LIB)
 
 run: compile
-	@if [ $(K_VAL) -gt 64 ]; then \
-		echo "K = $(K_VAL) > 64, running CGBN kernel with $(CONFIG)"; \
+	@if [ $(K_VAL) -ge 64 ]; then \
+		echo "K = $(K_VAL) >= 64, running CGBN kernel with $(CONFIG)"; \
 		python3 test_cgbn.py $(CONFIG); \
 	else \
-		echo "K = $(K_VAL) <= 64, running regular kernel with $(CONFIG)"; \
+		echo "K = $(K_VAL) < 64, running regular kernel with $(CONFIG)"; \
 		python3 test_foldshift.py $(CONFIG); \
 	fi
 

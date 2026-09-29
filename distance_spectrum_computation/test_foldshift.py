@@ -2,7 +2,7 @@
 import os, ctypes
 import numpy as np
 import yaml
-from setup import setup_A_Wbit_D
+from setup import setup_A_Wbit_D, spectrum_filename
 from step import trellisStep_shift
 import argparse
 
@@ -12,30 +12,31 @@ def load_cuda_library():
     if not os.path.exists(lib_path):
         raise FileNotFoundError(f"Shared library not found: {lib_path}. Run foldshift_compile.sh first.")
     cuda_lib = ctypes.CDLL(lib_path)
-    cuda_lib.launchFoldshiftPipeline.argtypes = [
+    cuda_lib.launchFoldshiftPipelinePunctured.argtypes = [
         ctypes.c_int,
         ctypes.c_int, ctypes.c_int,
-        ctypes.c_void_p, ctypes.c_int, ctypes.c_int,
-        ctypes.c_void_p, ctypes.c_int, ctypes.c_int,
-        ctypes.c_int, ctypes.c_int, ctypes.c_int,
+        ctypes.c_void_p, ctypes.c_int, ctypes.POINTER(ctypes.c_uint8),
+        ctypes.c_void_p,
+        ctypes.c_int, ctypes.c_int,
         ctypes.c_int, ctypes.c_void_p,
     ]
-    cuda_lib.launchFoldshiftPipeline.restype = None
+    cuda_lib.launchFoldshiftPipelinePunctured.restype = ctypes.c_int
     return cuda_lib
 
 
 def main(path, cpu_only=False):
     with open(path, "r") as f:
         code_config = yaml.safe_load(f)
-    base_filename = f"k{code_config['bch_config']['K']}n{code_config['tbcc_config']['N']}v{code_config['tbcc_config']['V']}"
-    spectra_filename = f"{base_filename}_dist_spectrum.npy"
+    if code_config["bch_config"]["K"] >= 64:
+        raise ValueError("K >= 64 requires test_cgbn.py for exact spectrum counts")
+    spectra_filename = spectrum_filename(code_config)
     
 
-    As, W_weight, D, basis, num_trellis_stages, num_output_bits = setup_A_Wbit_D(code_config)
+    As, W_weight, D, basis, num_trellis_stages, _, widths = setup_A_Wbit_D(code_config)
     A_shape = As[0].shape
     O_y, O_x = A_shape
-    max_shift_per_stage = num_output_bits
-    max_X = O_x + max_shift_per_stage * num_trellis_stages
+    period = len(widths)
+    max_X = code_config["tbcc_config"]["N"] + 1
 
     # O_y = 2^(nu + m); retain the automatic safety gate for comparison runs.
     use_cpu = cpu_only or O_y <= 1024
@@ -45,11 +46,9 @@ def main(path, cpu_only=False):
         for i_stream, A in enumerate(As):
             result = A.copy()
             for stage in range(num_trellis_stages):
-                result = trellisStep_shift(result, W_weight, D, max_shift_per_stage)
-            # result is [num_states, final_width]; pad to max_X
-            padded = np.zeros((result.shape[0], max_X), dtype=result.dtype)
-            padded[:, :result.shape[1]] = result
-            cpu_spectrum += padded[basis[i_stream], :]
+                phase = stage % period
+                result = trellisStep_shift(result, W_weight[phase], D, int(widths[phase]))
+            cpu_spectrum += result[basis[i_stream], :]
 
         assert len(cpu_spectrum) == code_config["tbcc_config"]["N"] + 1
         assert int(cpu_spectrum.sum()) == 2 ** code_config["bch_config"]["K"]
@@ -68,15 +67,18 @@ def main(path, cpu_only=False):
         O_y, O_x = A.shape
         starting_state = int(np.nonzero(A)[0][0])
 
-        cuda_lib.launchFoldshiftPipeline(
+        status = cuda_lib.launchFoldshiftPipelinePunctured(
             starting_state,
             O_y, O_x,
-            d_W.device_ctypes_pointer.value, W_weight.shape[0], W_weight.shape[1],
-            d_D.device_ctypes_pointer.value, D.shape[0], D.shape[1],
-            num_trellis_stages, max_shift_per_stage, max_X,
+            d_W.device_ctypes_pointer.value, period,
+            widths.ctypes.data_as(ctypes.POINTER(ctypes.c_uint8)),
+            d_D.device_ctypes_pointer.value,
+            num_trellis_stages, max_X,
             int(basis[i_stream]),
             d_spectrum.device_ctypes_pointer.value,
         )
+        if status != 0:
+            raise RuntimeError(f"CUDA foldshift pipeline failed with error {status}")
 
     cuda.synchronize()
     gpu_spectrum = d_spectrum.copy_to_host()
@@ -87,10 +89,8 @@ def main(path, cpu_only=False):
     np.save("output/fold/" + spectra_filename, gpu_spectrum)
 
     if use_cpu:
-        if np.array_equal(cpu_spectrum, gpu_spectrum):
-            print("gpu matches cpu spectrum, all good")
-        else:
-            print("error: cpu and gpu spectrums are different")
+        np.testing.assert_array_equal(cpu_spectrum, gpu_spectrum)
+        print("gpu matches cpu spectrum, all good")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

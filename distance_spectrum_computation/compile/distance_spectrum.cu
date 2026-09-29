@@ -1,5 +1,6 @@
 #include <cuda_runtime.h>
 #include <stdint.h>
+#include <stdio.h>
 
 #define MAX_BRANCH_WEIGHT 3
 
@@ -44,7 +45,7 @@ __global__ void numba_sharedMem_trellisStep_foldshift(
 
     // Load W into shared memory
     // we process 64 states for each thread block
-    // storage requirement: 64*2*1 = 128 bytes
+    // One byte per predecessor state: 64 bytes.
     __shared__ uint8_t shared_W[64];
 
     // initialize shared_W to zero
@@ -59,7 +60,7 @@ __global__ void numba_sharedMem_trellisStep_foldshift(
 
     // Load D into shared memory
     // we process 64 states for each thread block
-    // storage requirement: 64*2*4 = 512 bytes (32-bit integers)
+    // One 32-bit destination per predecessor state: 256 bytes.
     __shared__ uint32_t shared_D[64];
 
     shared_D[ty] = 0;
@@ -132,7 +133,7 @@ __global__ void numba_sharedMem_trellisStep_foldshift(
             carry = shared_out[2 * ty + z][tx + bs_x];
         }
 
-        if (x_id < curr_max_weight + max_shift_per_stage) {
+        if (y < mid_y && x_id < curr_max_weight + max_shift_per_stage) {
             out[(2 * y + z) * out_dim1 + x_id] = shared_out[2 * ty + z][tx];
         }
 
@@ -142,14 +143,99 @@ __global__ void numba_sharedMem_trellisStep_foldshift(
     // flush carry 
     if (tx < max_shift_per_stage) {
         int carry_x = num_blk_iters * bs_x + tx;
-        if (carry_x < curr_max_weight + max_shift_per_stage && carry != 0) {
+        if (y < mid_y && carry_x < curr_max_weight + max_shift_per_stage && carry != 0) {
             out[(2 * y + z) * out_dim1 + carry_x] = carry;
         }
     }
 }
 
-// launch wrapper so we can have python driver 
-extern "C" void launchFoldshiftPipeline (
+// W is contiguous [period][num_states][2]. Each existing stage launch sees
+// one [num_states][2] slice, so shared_W remains unchanged.
+extern "C" int launchFoldshiftPipelinePunctured(
+    int starting_state,
+    int num_states, int initial_max_weight,
+    const uint8_t* d_W, int period, const uint8_t* widths,
+    const uint32_t* d_D,
+    int num_trellis_stages, int max_X,
+    int basis_state, uint64_t* d_spectrum
+) {
+    if (!d_W || !widths || !d_D || !d_spectrum || period < 1 ||
+        num_states < 2 || num_trellis_stages < 1 ||
+        starting_state < 0 || starting_state >= num_states ||
+        basis_state < 0 || basis_state >= num_states) {
+        return (int)cudaErrorInvalidValue;
+    }
+    int expected_width = initial_max_weight;
+    for (int stage = 0; stage < num_trellis_stages; ++stage) {
+        uint8_t shift = widths[stage % period];
+        if (shift > MAX_BRANCH_WEIGHT) return (int)cudaErrorInvalidValue;
+        expected_width += shift;
+    }
+    if (initial_max_weight < 1 || max_X != expected_width) {
+        return (int)cudaErrorInvalidValue;
+    }
+
+    int curr_max_weight = initial_max_weight;
+    uint64_t* d_buffer_a = nullptr;
+    uint64_t* d_buffer_b = nullptr;
+    size_t allocation_size = (size_t)sizeof(uint64_t) * (size_t)max_X * (size_t)(num_states);
+    cudaError_t err = cudaSuccess;
+    do {
+        err = cudaMalloc(&d_buffer_a, allocation_size);
+        if (err != cudaSuccess) break;
+        err = cudaMalloc(&d_buffer_b, allocation_size);
+        if (err != cudaSuccess) break;
+        err = cudaMemset(d_buffer_a, 0, allocation_size);
+        if (err != cudaSuccess) break;
+        err = cudaMemset(d_buffer_b, 0, allocation_size);
+        if (err != cudaSuccess) break;
+
+        uint64_t one_value = 1;
+        err = cudaMemcpy(&d_buffer_a[(size_t)starting_state * max_X],
+                         &one_value, sizeof(uint64_t), cudaMemcpyHostToDevice);
+        if (err != cudaSuccess) break;
+
+        uint64_t* d_in = d_buffer_a;
+        uint64_t* d_out = d_buffer_b;
+        for (int stage = 0; stage < num_trellis_stages; ++stage) {
+            err = cudaMemset(d_out, 0, allocation_size);
+            if (err != cudaSuccess) break;
+
+            int phase = stage % period;
+            int shift = widths[phase];
+            const uint8_t* stage_W = d_W + (size_t)phase * num_states * 2;
+            dim3 block(32, 32, 1);
+            dim3 grid(1, (num_states / 2 + 31) / 32, 2);
+            numba_sharedMem_trellisStep_foldshift<uint64_t><<<grid, block>>>(
+                d_in, num_states, max_X,
+                stage_W, num_states, 2,
+                d_D, num_states, 2,
+                d_out, num_states, max_X,
+                curr_max_weight, shift
+            );
+            err = cudaGetLastError();
+            if (err != cudaSuccess) break;
+            curr_max_weight += shift;
+            uint64_t* tmp = d_in; d_in = d_out; d_out = tmp;
+        }
+        if (err != cudaSuccess) break;
+
+        int threads = 256;
+        int blocks_1d = (max_X + threads - 1) / threads;
+        accumulate_to_spectrum<uint64_t><<<blocks_1d, threads>>>(
+            d_in, num_states, max_X, basis_state, d_spectrum
+        );
+        err = cudaGetLastError();
+        if (err == cudaSuccess) err = cudaDeviceSynchronize();
+    } while (false);
+
+    if (d_buffer_a) cudaFree(d_buffer_a);
+    if (d_buffer_b) cudaFree(d_buffer_b);
+    return (int)err;
+}
+
+// Preserve the original ABI for unpunctured callers.
+extern "C" void launchFoldshiftPipeline(
     int starting_state,
     int num_states, int initial_max_weight,
     const uint8_t* d_W, int W_dim0, int W_dim1,
@@ -157,54 +243,22 @@ extern "C" void launchFoldshiftPipeline (
     int num_trellis_stages, int max_shift_per_stage, int max_X,
     int basis_state, uint64_t* d_spectrum
 ) {
-    if (max_shift_per_stage < 2 || max_shift_per_stage > MAX_BRANCH_WEIGHT) {
+    if (W_dim0 != num_states || W_dim1 != 2 ||
+        D_dim0 != num_states || D_dim1 != 2 ||
+        max_shift_per_stage < 0 || max_shift_per_stage > MAX_BRANCH_WEIGHT) {
+        fprintf(stderr, "Invalid legacy foldshift arguments\n");
         return;
     }
-    int curr_max_weight = initial_max_weight;
-
-    uint64_t* d_buffer_a;
-    uint64_t* d_buffer_b;
-    size_t allocation_size = (size_t)sizeof(uint64_t) * (size_t)max_X * (size_t)(num_states);
-
-    cudaMalloc(&d_buffer_a, allocation_size);
-    cudaMalloc(&d_buffer_b, allocation_size);
-
-    cudaMemset(d_buffer_a, 0, allocation_size);
-    cudaMemset(d_buffer_b, 0, allocation_size);
-
-    uint64_t one_value = 1;
-    cudaMemcpy(&d_buffer_a[starting_state * max_X], &one_value, sizeof(uint64_t), cudaMemcpyHostToDevice);
-
-    uint64_t* d_in = d_buffer_a;
-    uint64_t* d_out = d_buffer_b;
- 
-    for (int stage = 0; stage < num_trellis_stages; ++stage) {
-        cudaMemset(d_out, 0, sizeof(uint64_t) * num_states * max_X);
- 
-        dim3 block(32, 32, 1);
-        dim3 grid(1, (num_states / 2 + 31) / 32, W_dim1);
- 
-        numba_sharedMem_trellisStep_foldshift<uint64_t><<<grid, block>>>(
-            d_in,  num_states, max_X,
-            d_W,   W_dim0, W_dim1,
-            d_D,   D_dim0, D_dim1,
-            d_out, num_states, max_X,
-            curr_max_weight, max_shift_per_stage
-        );
-        curr_max_weight += max_shift_per_stage;
- 
-        uint64_t* tmp = d_in; d_in = d_out; d_out = tmp;
-    }
- 
-    int threads = 256;
-    int blocks_1d = (max_X + threads - 1) / threads;
-    accumulate_to_spectrum<uint64_t><<<blocks_1d, threads>>>(
-        d_in, num_states, max_X, basis_state, d_spectrum
+    uint8_t width = (uint8_t)max_shift_per_stage;
+    int status = launchFoldshiftPipelinePunctured(
+        starting_state, num_states, initial_max_weight,
+        d_W, 1, &width, d_D, num_trellis_stages, max_X,
+        basis_state, d_spectrum
     );
-    cudaDeviceSynchronize();
-
-    cudaFree(d_buffer_a);
-    cudaFree(d_buffer_b);
+    if (status != (int)cudaSuccess) {
+        fprintf(stderr, "Foldshift pipeline failed: %s\n",
+                cudaGetErrorString((cudaError_t)status));
+    }
 }
 
 /*

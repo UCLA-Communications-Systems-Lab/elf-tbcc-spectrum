@@ -1,7 +1,9 @@
+import argparse
+import hashlib
+import sys
+
 import numpy as np
 import yaml
-import argparse
-import sys
 
 
 def octal_to_binary_list(octal_str):
@@ -22,6 +24,49 @@ def bin2dec(binary):
         int(sum(val * (2**idx) for idx, val in enumerate(bin_list)))
         for bin_list in binary
     ]
+
+
+def normalize_puncture_pattern(pattern, num_generators, num_stages):
+    """Return generator-major mask, phase widths, and transmitted length."""
+    if pattern is None:
+        mask = np.ones((num_generators, 1), dtype=np.uint8)
+    else:
+        if not isinstance(pattern, list) or len(pattern) != num_generators:
+            raise ValueError("puncture_pattern must have one row per generator polynomial")
+        if not all(isinstance(row, list) for row in pattern):
+            raise ValueError("puncture_pattern rows must be lists")
+        period = len(pattern[0])
+        if not 1 <= period <= num_stages or any(len(row) != period for row in pattern):
+            raise ValueError("puncture_pattern rows must have equal length in 1..number of stages")
+        if any(type(bit) is not int or bit not in (0, 1) for row in pattern for bit in row):
+            raise ValueError("puncture_pattern entries must be integers 0 or 1")
+        mask = np.ascontiguousarray(pattern, dtype=np.uint8)
+
+    widths = np.sum(mask, axis=0, dtype=np.uint8)
+    transmitted_length = sum(int(widths[stage % mask.shape[1]]) for stage in range(num_stages))
+    if transmitted_length == 0:
+        raise ValueError("puncture_pattern must retain at least one bit")
+    return mask, widths, transmitted_length
+
+
+def puncture_fingerprint(mask):
+    """Stable short identifier that includes the mask's shape and bit order."""
+    shape = f"{mask.shape[0]}x{mask.shape[1]}:".encode("ascii")
+    return hashlib.sha256(shape + mask.tobytes()).hexdigest()[:12]
+
+
+def spectrum_filename(code_config):
+    """Keep legacy names for mother codes; identify punctured outputs."""
+    bch = code_config["bch_config"]
+    tbcc = code_config["tbcc_config"]
+    base = f"k{bch['K']}n{tbcc['N']}v{tbcc['V']}"
+    mask, _, _ = normalize_puncture_pattern(
+        tbcc.get("puncture_pattern"), len(tbcc["gen_polys"]), bch["K"] + bch["M"]
+    )
+    if np.any(mask == 0):
+        generators = "_".join(tbcc["gen_polys"])
+        base += f"_g{generators}_p{puncture_fingerprint(mask)}"
+    return f"{base}_dist_spectrum.npy"
 
 
 def validate_code_config(code_config):
@@ -46,8 +91,14 @@ def validate_code_config(code_config):
         raise ValueError("tbcc_config.gen_polys must be non-empty octal strings")
     if tbcc["K"] != bch["N"]:
         raise ValueError("tbcc_config.K must equal bch_config.N")
-    if tbcc["N"] != len(gen_polys) * tbcc["K"]:
-        raise ValueError("tbcc_config.N must equal len(gen_polys) * tbcc_config.K")
+    num_stages = bch["K"] + bch["M"]
+    if bch["N"] != num_stages:
+        raise ValueError("bch_config.N must equal bch_config.K + bch_config.M")
+    _, _, transmitted_length = normalize_puncture_pattern(
+        tbcc.get("puncture_pattern"), len(gen_polys), num_stages
+    )
+    if tbcc["N"] != transmitted_length:
+        raise ValueError("tbcc_config.N must equal the transmitted punctured length")
 
     return len(gen_polys)
 
@@ -61,6 +112,11 @@ def setup_A_Wbit_D(code_config):
     num_total_states = 2 ** (num_concat_memory)
     states = np.arange(0, num_total_states, dtype=np.int32)
     num_trellis_stages = code_config["bch_config"]["K"] + code_config["bch_config"]["M"]
+    mask, widths, _ = normalize_puncture_pattern(
+        code_config["tbcc_config"].get("puncture_pattern"),
+        num_output_bits,
+        num_trellis_stages,
+    )
     generator_polys = [
         np.flip(octal_to_binary_list(poly))
         for poly in code_config["tbcc_config"]["gen_polys"]
@@ -91,9 +147,12 @@ def setup_A_Wbit_D(code_config):
     # output
     out0 = np.mod(np.matmul(input_0, generator_matrix.T), 2)
     out1 = np.mod(np.matmul(input_1, generator_matrix.T), 2)
-    Wout0 = np.sum(out0, axis=1, dtype=np.uint8)
-    Wout1 = np.sum(out1, axis=1, dtype=np.uint8)
-    W_weight = np.stack((Wout0, Wout1), axis=0).T.copy().astype(np.uint8)
+    # W[phase, state, input] is the weight of the bits retained by that
+    # column of the generator-major puncture mask.
+    W_weight = np.empty((mask.shape[1], num_total_states, 2), dtype=np.uint8)
+    for phase in range(mask.shape[1]):
+        W_weight[phase, :, 0] = out0 @ mask[:, phase]
+        W_weight[phase, :, 1] = out1 @ mask[:, phase]
 
     # set up A
     # A_in: [num_states] x [max weight up to this meta-stage]
@@ -108,7 +167,7 @@ def setup_A_Wbit_D(code_config):
     # D_in: [num_states] x [input]
     D = np.stack((dst_0, dst_1), axis=1).astype(np.uint32)
 
-    return As, W_weight, D, basis, num_trellis_stages, num_output_bits
+    return As, W_weight, D, basis, num_trellis_stages, num_output_bits, widths
 
 
 def computeMetaStage(W, D, dtype=np.uint64):

@@ -14,12 +14,13 @@ CONFIG_DIR = Path(__file__).parent / "config"
 
 
 def cpu_spectrum(config):
-    As, weights, destinations, basis, stages, max_shift = setup_A_Wbit_D(config)
-    spectrum = np.zeros(1 + max_shift * stages, dtype=np.uint64)
+    As, weights, destinations, basis, stages, _, widths = setup_A_Wbit_D(config)
+    spectrum = np.zeros(1 + sum(int(widths[t % len(widths)]) for t in range(stages)), dtype=np.uint64)
     for stream, initial in enumerate(As):
         result = initial.copy()
-        for _ in range(stages):
-            result = trellisStep_shift(result, weights, destinations, max_shift)
+        for stage in range(stages):
+            phase = stage % len(widths)
+            result = trellisStep_shift(result, weights[phase], destinations, int(widths[phase]))
         spectrum[: result.shape[1]] += result[basis[stream]]
     return spectrum, weights
 
@@ -40,7 +41,7 @@ class RateSupportTests(unittest.TestCase):
             },
         }
         spectrum, weights = cpu_spectrum(config)
-        self.assertEqual(weights.shape[1], 2)  # one binary input bit per stage
+        self.assertEqual(weights.shape[2], 2)  # one binary input bit per stage
         self.assertLessEqual(int(weights.max()), 3)
         self.assertEqual(len(spectrum), 46)
         self.assertEqual(int(spectrum.sum()), 2 ** 11)
@@ -64,7 +65,7 @@ class RateSupportTests(unittest.TestCase):
         }
         invalid = copy.deepcopy(config)
         invalid["tbcc_config"]["N"] = 44
-        with self.assertRaisesRegex(ValueError, "len\\(gen_polys\\)"):
+        with self.assertRaisesRegex(ValueError, "transmitted punctured length"):
             setup_A_Wbit_D(invalid)
 
     def test_rate_one_third_search_uses_unique_triplets(self):

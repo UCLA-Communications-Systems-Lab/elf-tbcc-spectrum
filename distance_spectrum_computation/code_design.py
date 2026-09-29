@@ -3,8 +3,12 @@ import os, ctypes
 from pathlib import Path
 import numpy as np
 import yaml
-from setup import setup_A_Wbit_D
-from itertools import combinations, product
+from setup import (
+    setup_A_Wbit_D,
+    normalize_puncture_pattern,
+    puncture_fingerprint,
+)
+from itertools import combinations, permutations, product
 from cyclic import divides_xN_minus_1
 
 
@@ -18,23 +22,20 @@ def load_cuda_library():
             f"Shared library not found: {lib_path}. Run foldshift_compile.sh first."
         )
     cuda_lib = ctypes.CDLL(lib_path)
-    cuda_lib.launchFoldshiftPipeline.argtypes = [
+    cuda_lib.launchFoldshiftPipelinePunctured.argtypes = [
         ctypes.c_int,
         ctypes.c_int,
         ctypes.c_int,
         ctypes.c_void_p,
         ctypes.c_int,
-        ctypes.c_int,
+        ctypes.POINTER(ctypes.c_uint8),
         ctypes.c_void_p,
-        ctypes.c_int,
-        ctypes.c_int,
-        ctypes.c_int,
         ctypes.c_int,
         ctypes.c_int,
         ctypes.c_int,
         ctypes.c_void_p,
     ]
-    cuda_lib.launchFoldshiftPipeline.restype = None
+    cuda_lib.launchFoldshiftPipelinePunctured.restype = ctypes.c_int
     return cuda_lib
 
 
@@ -97,6 +98,7 @@ def gen_all_elf_tbcc(
     cyclic_only=False,
     fixed_elf_poly=None,
     fixed_tbcc_polys=None,
+    puncture_pattern=None,
 ):
     K_tbcc = N_elf
 
@@ -120,40 +122,62 @@ def gen_all_elf_tbcc(
 
     # --- 2. TBCC Options ---
     tbcc_options = []
-    if N_tbcc % K_tbcc:
-        raise ValueError("tbcc_config.N must be an integer multiple of tbcc_config.K")
-    rate_denominator = N_tbcc // K_tbcc
+    if puncture_pattern is None:
+        if N_tbcc % K_tbcc:
+            raise ValueError("tbcc_config.N must be an integer multiple of tbcc_config.K")
+        rate_denominator = N_tbcc // K_tbcc
+    else:
+        if not isinstance(puncture_pattern, list):
+            raise ValueError("puncture_pattern must have one row per generator polynomial")
+        rate_denominator = len(puncture_pattern)
     if rate_denominator not in (2, 3):
         raise ValueError("Only rate-1/2 and rate-1/3 TBCC searches are supported")
+    mask, _, transmitted_length = normalize_puncture_pattern(
+        puncture_pattern, rate_denominator, K_tbcc
+    )
+    if N_tbcc != transmitted_length:
+        raise ValueError("tbcc_config.N must equal the transmitted punctured length")
+    punctured = bool(np.any(mask == 0))
+    mask_field = {"puncture_pattern": mask.tolist()} if puncture_pattern is not None else {}
 
     if fixed_tbcc_polys is not None:
         if len(fixed_tbcc_polys) != rate_denominator:
             raise ValueError(
-                "gen_polys length must match tbcc_config.N / tbcc_config.K"
+                "gen_polys length must match puncture_pattern rows or mother rate"
             )
-        tbcc_options.append(
-            {"K": K_tbcc, "N": N_tbcc, "V": nu, "gen_polys": list(fixed_tbcc_polys)}
-        )
+        tbcc_options.append({
+            "K": K_tbcc, "N": N_tbcc, "V": nu,
+            "gen_polys": list(fixed_tbcc_polys), **mask_field,
+        })
     else:
         full_degree_polys, all_polys = polynomial_candidates(nu)
         full_degree_set = set(full_degree_polys)
         num_skipped = 0
         if rate_denominator == 2:
-            candidates = ((p1, p2) for p1, p2 in product(full_degree_polys, all_polys))
+            pairs = ((p1, p2) for p1, p2 in product(full_degree_polys, all_polys))
+            if punctured:
+                base_pairs = set(pairs)
+                candidates = sorted(base_pairs | {tuple(reversed(pair)) for pair in base_pairs})
+            else:
+                candidates = pairs
         else:
-            candidates = (
+            triplets = (
                 generators
                 for generators in combinations(all_polys, 3)
                 if any(poly in full_degree_set for poly in generators)
             )
+            candidates = (
+                ordered for triplet in triplets for ordered in permutations(triplet)
+            ) if punctured else triplets
 
         for generators in candidates:
             if not generators_are_noncatastrophic(generators):
                 num_skipped += 1
                 continue
-            tbcc_options.append(
-                {"K": K_tbcc, "N": N_tbcc, "V": nu, "gen_polys": list(generators)}
-            )
+            tbcc_options.append({
+                "K": K_tbcc, "N": N_tbcc, "V": nu,
+                "gen_polys": list(generators), **mask_field,
+            })
         print(f"Skipped {num_skipped} catastrophic combinations.")
 
     # --- 3. Enumerate Combinations ---
@@ -161,12 +185,13 @@ def gen_all_elf_tbcc(
     skipped_polys = 0
     elf_tbcc_configs = []
     for b, t in product(elf_options, tbcc_options):
-        elf_oct = oct(int(b["polynomial"], 2))[2:]
-        key = generator_key(elf_oct, t["gen_polys"], m, nu)
-        if key in symmetric_polys:
-            skipped_polys += 1
-            continue
-        symmetric_polys.add(key)
+        if not punctured:
+            elf_oct = oct(int(b["polynomial"], 2))[2:]
+            key = generator_key(elf_oct, t["gen_polys"], m, nu)
+            if key in symmetric_polys:
+                skipped_polys += 1
+                continue
+            symmetric_polys.add(key)
 
         filename = (
             f"elf_p{b['polynomial']}_" f"tbcc_v{t['V']}_g{'_'.join(t['gen_polys'])}.npy"
@@ -183,11 +208,16 @@ def gen_all_elf_tbcc(
     return elf_tbcc_configs
 
 
-def search_output_prefix(config_path, label="gridsearch"):
+def search_output_prefix(config_path, label="gridsearch", puncture_mask=None):
     """Build a stable result prefix from a YAML file and optional run label."""
     if not label:
         label = "gridsearch"
-    return f"{Path(config_path).stem}_{label}"
+    prefix = Path(config_path).stem
+    if puncture_mask is not None:
+        puncture_mask = np.asarray(puncture_mask, dtype=np.uint8)
+        if np.any(puncture_mask == 0):
+            prefix += f"_p{puncture_fingerprint(puncture_mask)}"
+    return f"{prefix}_{label}"
 
 
 def search_output_path(output_dir, prefix, batch_index=None):
@@ -206,8 +236,6 @@ def run_grid_search(
 ):
     """Evaluate one GPU grid-search batch and store its distance spectra in HDF5."""
     import h5py
-    from numba import cuda
-    from dsu_bound_plots.bounds import dsu
 
     config_path = Path(config_path)
     output_dir = Path(output_dir)
@@ -215,9 +243,10 @@ def run_grid_search(
         config = yaml.safe_load(f)
 
     print(f"Loaded config: {config}")
-    cuda_lib = load_cuda_library()
 
     K_elf = config["bch_config"]["K"]
+    if K_elf >= 64:
+        raise ValueError("GPU grid search supports K < 64; use the direct CGBN runner")
     N_elf = config["bch_config"]["N"]
     m = config["bch_config"]["M"]
     N_tbcc = config["tbcc_config"]["N"]
@@ -226,6 +255,7 @@ def run_grid_search(
     # Check for specific predefined constraints in config
     fixed_elf_poly = config["bch_config"].get("polynomial")
     fixed_tbcc_polys = config["tbcc_config"].get("gen_polys")
+    puncture_pattern = config["tbcc_config"].get("puncture_pattern")
 
     elf_tbcc_configs = gen_all_elf_tbcc(
         K_elf=K_elf,
@@ -236,6 +266,7 @@ def run_grid_search(
         cyclic_only=cyclic_only,
         fixed_elf_poly=fixed_elf_poly,
         fixed_tbcc_polys=fixed_tbcc_polys,
+        puncture_pattern=puncture_pattern,
     )
 
     total_configs = len(elf_tbcc_configs)
@@ -243,7 +274,14 @@ def run_grid_search(
         print("No configurations generated to process.")
         return
 
-    prefix = search_output_prefix(config_path, label)
+    num_generators = len(elf_tbcc_configs[0]["tbcc_config"]["gen_polys"])
+    mask, _, _ = normalize_puncture_pattern(puncture_pattern, num_generators, N_elf)
+    from numba import cuda
+    from dsu_bound_plots.bounds import dsu
+
+    cuda_lib = load_cuda_library()
+
+    prefix = search_output_prefix(config_path, label, mask)
     batch_output = None
     if total_configs > batch_size:
         start_idx = batch_index * batch_size
@@ -266,7 +304,9 @@ def run_grid_search(
     output_dir.mkdir(parents=True, exist_ok=True)
     file_path = search_output_path(output_dir, prefix, batch_output)
     with h5py.File(file_path, "w") as f:
-        pass
+        f.attrs["puncture_pattern"] = mask
+        f.attrs["mother_N"] = N_elf * num_generators
+        f.attrs["transmitted_N"] = N_tbcc
     print(f"Writing results to {file_path}")
 
     target_ebno_dB = config["target_EbNo_dB"]
@@ -281,13 +321,13 @@ def run_grid_search(
             if i % 100 == 0:
                 print(f"Local Batch Processed: {i}/{len(elf_tbcc_configs)}", flush=True)
 
-            As, W_weight, D, basis, num_trellis_stages, num_output_bits = (
+            As, W_weight, D, basis, num_trellis_stages, _, widths = (
                 setup_A_Wbit_D(code_config)
             )
             A_shape = As[0].shape
             O_y, O_x = A_shape
-            max_shift_per_stage = num_output_bits
-            max_X = O_x + max_shift_per_stage * num_trellis_stages
+            period = len(widths)
+            max_X = N_tbcc + 1
 
             d_W = cuda.to_device(W_weight)
             d_D = cuda.to_device(D)
@@ -297,25 +337,26 @@ def run_grid_search(
                 O_y, O_x = A.shape
                 starting_state = int(np.nonzero(A)[0][0])
 
-                cuda_lib.launchFoldshiftPipeline(
+                status = cuda_lib.launchFoldshiftPipelinePunctured(
                     starting_state,
                     O_y,
                     O_x,
                     d_W.device_ctypes_pointer.value,
-                    W_weight.shape[0],
-                    W_weight.shape[1],
+                    period,
+                    widths.ctypes.data_as(ctypes.POINTER(ctypes.c_uint8)),
                     d_D.device_ctypes_pointer.value,
-                    D.shape[0],
-                    D.shape[1],
                     num_trellis_stages,
-                    max_shift_per_stage,
                     max_X,
                     int(basis[i_stream]),
                     d_spectrum.device_ctypes_pointer.value,
                 )
+                if status != 0:
+                    raise RuntimeError(f"CUDA foldshift pipeline failed with error {status}")
 
             cuda.synchronize()
             gpu_spectrum = d_spectrum.copy_to_host()
+            if int(gpu_spectrum.sum()) != 2 ** K_elf:
+                raise AssertionError("GPU spectrum sum does not equal 2^K")
 
             if gpu_spectrum[0] == 1:
                 spectra = dist_spectra(

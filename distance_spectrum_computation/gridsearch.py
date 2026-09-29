@@ -7,6 +7,17 @@ import numpy as np
 
 from code_design import run_grid_search, search_output_path
 
+PUNCTURE_METADATA = ("puncture_pattern", "mother_N", "transmitted_N")
+
+
+def _batch_metadata(batch_file):
+    present = [key in batch_file.attrs for key in PUNCTURE_METADATA]
+    if any(present) and not all(present):
+        raise ValueError("Batch has incomplete puncture metadata")
+    if not any(present):
+        return None
+    return {key: batch_file.attrs[key] for key in PUNCTURE_METADATA}
+
 
 def merge_batches(output_dir, prefix):
     """Merge all ``<prefix>_batch*.h5`` files into one HDF5 result file."""
@@ -17,8 +28,27 @@ def merge_batches(output_dir, prefix):
     if not batch_files:
         raise FileNotFoundError(f"No batch files found for prefix '{prefix}' in {output_dir}")
 
+    # Validate before creating the output, so incompatible batches cannot
+    # leave behind a partial merged file.
+    reference = None
+    for index, batch_path in enumerate(batch_files):
+        with h5py.File(batch_path, "r") as batch_file:
+            metadata = _batch_metadata(batch_file)
+        if index == 0:
+            reference = metadata
+        elif (reference is None) != (metadata is None) or (
+            reference is not None and any(
+                not np.array_equal(reference[key], metadata[key])
+                for key in PUNCTURE_METADATA
+            )
+        ):
+            raise ValueError("Batch puncture metadata does not match")
+
     merged_path = output_dir / f"{prefix}_merged.h5"
     with h5py.File(merged_path, "w") as merged_file:
+        if reference is not None:
+            for key, value in reference.items():
+                merged_file.attrs[key] = value
         for batch_path in batch_files:
             with h5py.File(batch_path, "r") as batch_file:
                 for group_name in batch_file:
