@@ -2,11 +2,12 @@ bch_config:
   K: 21
   N: 31
   M: 10
+  polynomial: "10110101101"
 
 tbcc_config:
   K: 31
   N: 62
-  V: 5
-  gen_polys: ["53", "75"]
+  V: 3
+  gen_polys: ["13", "17"]
 
 target_EbNo_dB: 5

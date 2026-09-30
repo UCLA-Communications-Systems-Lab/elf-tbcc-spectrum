@@ -9,12 +9,11 @@
 
 ## Build, Test, and Development Commands
 
-Create an isolated Python environment, then install dependencies:
+Always use the conda environment `codex-research`:
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+conda activate codex-research
+# Environment path: /Users/brucequ/miniforge3/envs/codex-research
 ```
 
 From `distance_spectrum_computation/`, run `make CONFIG=config/k11n30v6.yaml` to select the appropriate CUDA kernel, build `lib/libfoldshift.so`, and execute the matching verification script. Use `make clean` to remove that library. CUDA builds require `nvcc`; CGBN cases also require `CGBN_INCLUDE` and GMP.
