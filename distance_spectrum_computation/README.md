@@ -62,7 +62,7 @@ python test_cgbn.py config/k4n6v1.yaml
 
 ## CUDA and Colab Setup
 
-CUDA builds require `nvcc`; CGBN runs additionally need CGBN and GMP. On Colab, manually clone the intended branch before opening `gridsearch.ipynb`:
+CUDA builds require `nvcc`; CGBN runs additionally need CGBN and GMP. On Colab, create a GPU session with `colab-cli`, then clone the intended branch and compile in the session:
 
 ```bash
 git clone --branch dev-spectrum-codex https://github.com/UCLA-Communications-Systems-Lab/elf-tbcc-spectrum.git /content/tbcc-decoder-test
@@ -70,7 +70,7 @@ cd /content/tbcc-decoder-test/distance_spectrum_computation/compile
 bash foldshift_compile.sh
 ```
 
-The notebook does not clone or pull Git repositories. Its configuration cell creates a YAML file in `config/` from editable `K`, `ELF_MEMORY`, `TBCC_MEMORY`, `RATE_DENOMINATOR`, and optional fixed-polynomial variables. Leave `ELF_POLYNOMIAL` and `GEN_POLYS` as `None` to search all candidates.
+Create a YAML experiment in `config/` and run the `gridsearch.py` commands below through `colab-cli`. Omit `bch_config.polynomial` and `tbcc_config.gen_polys` to search all candidates; set them to constrain the search. Download the HDF5 results before ending the Colab session.
 
 ## Grid Search Commands
 
