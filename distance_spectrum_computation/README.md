@@ -93,3 +93,27 @@ An unbatched run writes `k11n30v5_gridsearch.h5`; batches write `k11n30v5_gridse
 Punctured runs add a mask fingerprint to the filename and store the
 generator-major mask and both mother and transmitted lengths as HDF5
 attributes. Merge batches only when these attributes agree.
+
+## Punctured (128, 64) DSU and RCU Plot
+
+The `(128, 64)` DSU curve uses the complete punctured distance spectrum in
+`output/k64n128v8_g561_753_p547bcf8a47ba_dist_spectrum.npy` and evaluates
+the Gaussian tail with `ndtr(-x)`. The RCU curve uses the existing MATLAB
+`RCU_warpper` saddlepoint approximation for uniform
+BPSK (`pX = [0.5 0.5]`, `X = [-1 1]`). From the repository root, regenerate its
+51-point CSV with MATLAB's RCU directory on the search path:
+
+```bash
+conda activate codex-research
+cd distance_spectrum_computation/dsu_bound_plots
+export MATLAB_RCU_DIR=/path/to/Finite_Length_Converse_Bounds/RCU
+matlab -batch "addpath(getenv('MATLAB_RCU_DIR')); ebno_dB = 1:0.1:6; data = RCU_warpper(64, 128, [0.5 0.5], [-1 1], ebno_dB); writematrix(data, 'data/k64n128_rcu.csv');"
+python n128k64_plots.py
+```
+
+`RCU_warpper` writes SNR, `Eb/N0`, `Es/N0`, and error probability in columns
+1–4. For rate `64/128`, its SNR input equals `Eb/N0` in dB. The plot writes
+`figures/k64n128_dsu_rcu.pdf` and `.png`, with `Eb/N0` from 1 to 6 dB and a
+logarithmic probability axis from `1e-10` to `1e-1`. Values outside the
+visible probability range remain in the plotted data. To use another local
+spectrum file, pass `--spectrum /path/to/spectrum.npy`.

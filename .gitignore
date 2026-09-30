@@ -13,8 +13,12 @@ test.ipynb
 
 # Large data files
 data/
+!/distance_spectrum_computation/dsu_bound_plots/data/
+/distance_spectrum_computation/dsu_bound_plots/data/*
+!/distance_spectrum_computation/dsu_bound_plots/data/k64n128_rcu.csv
 *.h5
 /distance_spectrum_computation/dsu_bound_plots/figures/
+/distance_spectrum_computation/dsu_bound_plots/spectra/
 /distance_spectrum_computation/output/
 
 # OS / editor artefacts

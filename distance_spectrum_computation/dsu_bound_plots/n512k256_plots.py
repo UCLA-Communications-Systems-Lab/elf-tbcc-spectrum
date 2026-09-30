@@ -1,10 +1,4 @@
-from dataclasses import dataclass
-from matplotlib.patches import Ellipse
-from typing import Optional
-from bounds import dsu
-
 import numpy as np
-from scipy import special, integrate
 import matplotlib.pyplot as plt
 import matplotlib
 
@@ -35,14 +29,6 @@ gem12_colors = [
 plt.rcParams["axes.prop_cycle"] = cycler(color=gem12_colors)
 
 
-@dataclass
-class dist_spectra:
-    crc: str
-    hamming_dist: np.array
-    num_cwds: np.array
-    dmin: int
-
-
 N = 512
 K = 256
 R = K / N
@@ -55,11 +41,6 @@ esno_dB = 10 * np.log10(esno_linear)
 # Es/sigma^2
 es_over_sigma_sqrd_linear = esno_linear * 2
 es_over_sigma_sqrd_dB = 10 * np.log10(es_over_sigma_sqrd_linear)
-
-## - bounds
-# dsu
-# TODO
-
 
 # SP59
 k256n512_sp59 = np.loadtxt("data/k256n512_sp59.csv", delimiter=",")

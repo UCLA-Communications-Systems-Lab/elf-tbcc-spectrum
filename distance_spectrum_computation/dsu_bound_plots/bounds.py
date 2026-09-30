@@ -3,7 +3,7 @@ from scipy import special, integrate
 
 
 def qfunc(x):
-    return 0.5 - 0.5 * special.erf(x / np.sqrt(2.0, dtype=np.float64))
+    return special.ndtr(-np.asarray(x))
 
 
 def dsu(dist_spectra, esno_linear):
